@@ -4,7 +4,7 @@ import multiprocessing as mp
 
 import pandas as pd
 
-import kkmbaekkrx
+import krxStocks
 
 def code_to_dict(code):
     try:
