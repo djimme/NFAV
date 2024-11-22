@@ -1,4 +1,6 @@
 import datetime
+from venv import logger
+
 import pandas as pd
 
 import krxStocks as kS
@@ -12,7 +14,9 @@ if __name__ == '__main__':
     print(df_nfav)
 
     for code in df_krxStocks['code']:
-        code = '005930'
+        if(code != '005930'):
+            logger.info(f'Processing {code}')
+            continue
         content = fnFI.getFnguideFinance(code)
         result = fnFI.parseFnguideFinance(code, content)
         break

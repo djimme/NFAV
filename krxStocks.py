@@ -11,7 +11,7 @@ from pandas import DataFrame, ExcelWriter
 def getKrxStocks():  
     #code_df = pd.read_html('http://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13', header=0)[0]
     
-    code_df = pd.read_excel('./comp_list.xlsx', sheet_name='comp_list')
+    code_df = pd.read_excel('./complist_1110.xlsx', sheet_name='complist_1110')
     
     code_df['종목코드'] = code_df['종목코드'].map("{:06d}".format)
     code_df = code_df[~code_df['회사명'].str.contains('스팩')]
@@ -26,4 +26,4 @@ def getKrxStocks():
 
 if __name__ == '__main__':
     df_complist = getKrxStocks()
-    df_complist.to_csv(path_or_buf='./complist.csv', encoding='cp949')
+    df_complist.to_csv(path_or_buf='./complist_1110.csv', encoding='cp949')

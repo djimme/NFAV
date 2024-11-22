@@ -55,29 +55,30 @@ def parseFnguideFinance(code, content):
     #     result["당기순이익_"+v[0].text] = pd.to_numeric(v[1].text.strip().replace(",", ""))
     #     # print(v)
 
-    재무상태quarter = None
-    유동자산quarter = None
-    비유동자산quarter = None
-    부채quarter = None
+    # 재무상태quarter = None
+    # 유동자산quarter = None
+    # 비유동자산quarter = None
+    # 부채quarter = None
+    #
+    # if html.select_one('#divDaechaQ') is not None:
+    #     재무상태quarter = html.select_one('#divDaechaQ').select_one('thead').select('th')
+    #     for trs in html.select_one('#divDaechaQ').select_one('tbody').select('tr'):
+    #         # rowName = trs.select_one('div')
+    #         # rowName = rowName.text if rowName else ''
+    #         # rowName = rowName.replace(u"\xa0",u"")
+    #         # # print(rowName)
+    #         # if (rowName.startswith("유동자산")):
+    #         #     유동자산quarter = trs.select('th, td')
+    #         # elif (rowName.startswith("부채")):
+    #         #     부채quarter = trs.select('th, td')
+    #         #
+    #         name
+    #
+    # for v in list(zip(재무상태quarter, 유동자산quarter, 부채quarter))[1:]:
+    #     # result["유동자산_"+v[0].text] = pd.to_numeric(v[1].text.strip().replace(",", ""))
+    #     # result["부채_"+v[0].text] = pd.to_numeric(v[2].text.strip().replace(",", ""))
+    #     print(v)
 
-    if html.select_one('#divDaechaQ') is not None:
-        재무상태quarter = html.select_one('#divDaechaQ').select_one('thead').select('th')
-        for trs in html.select_one('#divDaechaQ').select_one('tbody').select('tr'):
-            # rowName = trs.select_one('div')
-            # rowName = rowName.text if rowName else ''
-            # rowName = rowName.replace(u"\xa0",u"")
-            # # print(rowName)
-            # if (rowName.startswith("유동자산")):
-            #     유동자산quarter = trs.select('th, td')
-            # elif (rowName.startswith("부채")):
-            #     부채quarter = trs.select('th, td')
-            #
-            name
-
-    for v in list(zip(재무상태quarter, 유동자산quarter, 부채quarter))[1:]:
-        # result["유동자산_"+v[0].text] = pd.to_numeric(v[1].text.strip().replace(",", ""))
-        # result["부채_"+v[0].text] = pd.to_numeric(v[2].text.strip().replace(",", ""))
-        print(v)
-
+    print(result)
     return result
 
