@@ -69,7 +69,7 @@ def getStockPrice(api_key):
     df_Stocks.to_csv('./corpCode/stockPrice.csv', index=False, encoding='utf-8-sig' )
     return df_Stocks
 
-def getCorpMajorFi(api_key):
+def getCorpMajorFi(df_corp, api_key):
     cols = ['현금', '유동자산', '비유동자산', '부채', '비지배지분']
     df_corpMajorFi = pd.DataFrame(columns = cols)
     #url 입력
@@ -89,15 +89,30 @@ def getCorpMajorFi(api_key):
     content = res_CorpMajorFi.json()
 
     for l in content['list']:
-        match l['account_nm']:
-            case '유동자산' :
-        print('유동자산: {}'.format(l['thstrm_amount']))
+        account_nm = l.get('account_nm')
+
+        match account_nm:
+            case '현금및현금성자산':
+                print('현금및현금성자산: {}'.format(l['thstrm_amount']))
+            case '유동자산':
+                print('유동자산: {}'.format(l['thstrm_amount']))
+            case '비유동자산':
+                print('비유동자산: {}'.format(l['thstrm_amount']))
+            case '부채총계':
+                print('부채총계: {}'.format(l['thstrm_amount']))
+            case '비지배지분':
+                if (l['sj_nm'] == '재무상태표'):
+                    print('비지배지분: {}'.format(l['thstrm_amount']))
+
+    print(json.dumps(content['list'], ensure_ascii=False, indent=4))
 
     # 깔끔한 출력 위한 코드
     # print(df_corpMajorFi)
     # print(json.dumps(content, ensure_ascii=False, indent=4))
 
+    return df_corpMajorFi
+
 if __name__ == '__main__':
-    # df_corpCode = getCorpCode(DART_Key)
-    # df_Stocks = getStockPrice(KRX_Key)
-    df_corpMajorFi = getCorpMajorFi(DART_Key)
+    df_corpCode = getCorpCode(DART_Key)
+    df_Stocks = getStockPrice(KRX_Key)
+    df_corpMajorFi = getCorpMajorFi(df_corpCode, DART_Key)
