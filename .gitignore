@@ -122,3 +122,4 @@ __pycache__/*
 .idea/**/azureSettings.xml
 
 # End of https://www.toptal.com/developers/gitignore/api/pycharm
+corpCode/
