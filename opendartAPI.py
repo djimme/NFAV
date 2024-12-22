@@ -23,14 +23,14 @@ def getCorpCode(api_key):#인증키 입력
             zf.extractall('.\corpCode')
 
     # XML to dataframe
-    df_corpCode = pd.read_xml('./corpCode/CORPCODE.xml', xpath='.//list', dtype='str')
-    df_corpCode = (df_corpCode.loc[df_corpCode['stock_code'].notnull()]).reset_index(drop=True)
+    df_corpCode_xml = pd.read_xml('./corpCode/CORPCODE.xml', xpath='.//list', dtype='str')
+    df_corpCode_xml = (df_corpCode_xml.loc[df_corpCode_xml['stock_code'].notnull()]).reset_index(drop=True)
 
-    df_corpCode.to_csv('./corpCode/corpCode.csv', index=False, encoding='utf-8-sig')
+    df_corpCode_xml.to_csv('./corpCode/corpCode.csv', index=False, encoding='utf-8-sig')
 
-    print(df_corpCode)
+    print(df_corpCode_xml)
 
-    return df_corpCode
+    return df_corpCode_xml
 
 def getStockPrice(api_key):
     # today = dt.today().date().strftime('%Y%m%d')
@@ -71,16 +71,16 @@ def getStockPrice(api_key):
 
 def getCorpMajorFi(df_corp, api_key):
     cols = ['현금', '유동자산', '비유동자산', '부채', '비지배지분']
-    df_corpMajorFi = pd.DataFrame(columns = cols)
+    df_corpMajorFi_json = pd.DataFrame(columns = cols)
     #url 입력
     url = 'https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json'
 
     dt_year = dt.today().year
 
     params ={'crtfc_key' : api_key ,
-             'corp_code' : '00126380',
+             'corp_code' : '00126362',  # 삼성SDI
              'bsns_year' : dt_year,
-             'reprt_code' : '11012',
+             'reprt_code' : '11013',
              'fs_div' : 'CFS'}
 
     res_CorpMajorFi = requests.get(url, params=params)
@@ -93,26 +93,31 @@ def getCorpMajorFi(df_corp, api_key):
 
         match account_nm:
             case '현금및현금성자산':
-                print('현금및현금성자산: {}'.format(l['thstrm_amount']))
+                value = int(l['thstrm_amount'])/1000000
+                print('현금및현금성자산: {}'.format(str(value)))
             case '유동자산':
-                print('유동자산: {}'.format(l['thstrm_amount']))
+                value = int(l['thstrm_amount']) / 1000000
+                print('유동자산: {}'.format(str(value)))
             case '비유동자산':
-                print('비유동자산: {}'.format(l['thstrm_amount']))
+                value = int(l['thstrm_amount']) / 1000000
+                print('비유동자산: {}'.format(str(value)))
             case '부채총계':
-                print('부채총계: {}'.format(l['thstrm_amount']))
+                value = int(l['thstrm_amount']) / 1000000
+                print('부채총계: {}'.format(str(value)))
             case '비지배지분':
+                value = int(l['thstrm_amount']) / 1000000
                 if (l['sj_nm'] == '재무상태표'):
-                    print('비지배지분: {}'.format(l['thstrm_amount']))
+                    print('비지배지분: {}'.format(str(value)))
 
     print(json.dumps(content['list'], ensure_ascii=False, indent=4))
 
     # 깔끔한 출력 위한 코드
-    # print(df_corpMajorFi)
+    # print(df_corpMajorFi_json)
     # print(json.dumps(content, ensure_ascii=False, indent=4))
 
-    return df_corpMajorFi
+    return df_corpMajorFi_json
 
 if __name__ == '__main__':
     df_corpCode = getCorpCode(DART_Key)
-    df_Stocks = getStockPrice(KRX_Key)
+    df_stocksPrice = getStockPrice(KRX_Key)
     df_corpMajorFi = getCorpMajorFi(df_corpCode, DART_Key)
