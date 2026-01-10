@@ -10,7 +10,7 @@ def getFnguideFinance(code):
     now = datetime.datetime.now()
     path = f"https://comp.fnguide.com/SVO2/ASP/SVD_Finance.asp?pGB=1&gicode=A{code}&cID=&MenuYn=Y&ReportGB=&NewMenuID=103&stkGb=701"
 
-    downloadedFileDirectory = 'derived/fnguide_finance_{0}-{1:02d}'.format(now.year, now.month)
+    downloadedFileDirectory = './derived/fnguide_finance_{0}-{1:02d}'.format(now.year, now.month)
     downloadedFilePath = '{0}/{1}.html'.format(downloadedFileDirectory, code)
 
     if not os.path.exists(downloadedFileDirectory):
