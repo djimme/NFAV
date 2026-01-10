@@ -4,19 +4,20 @@ import multiprocessing as mp
 
 import pandas as pd
 
+import fnguide_collector
 import krxStocks
 
 def code_to_dict(code):
     try:
-        # snapshotHtml = kkmbaekkrx.getFnGuideSnapshot(code)      # Snapshot 페이지
-        # financeHtml = kkmbaekkrx.getFnguideFinance(code)        # 재무제표 페이지
-        fiRatioHtml = kkmbaekkrx.getFnGuideFiRatio(code)        # 재무비율 페이지
-        InvestIdxHtml = kkmbaekkrx.getFnGuideInvestIdx(code)    # 투자지표 페이지
-        
-        # snapshot = kkmbaekkrx.parseFnguideSnapshot(snapshotHtml)
-        # finance = kkmbaekkrx.parseFnguideFinance(financeHtml)
-        fiRatio = kkmbaekkrx.parseFnguideFiRatio(fiRatioHtml)
-        investIdx = kkmbaekkrx.parseFnGuideInvestIdx(InvestIdxHtml)
+        # snapshotHtml = fnguide_collector.getFnGuideSnapshot(code)      # Snapshot 페이지
+        # financeHtml = fnguide_collector.getFnguideFinance(code)        # 재무제표 페이지
+        fiRatioHtml = fnguide_collector.getFnGuideFiRatio(code)        # 재무비율 페이지
+        InvestIdxHtml = fnguide_collector.getFnGuideInvestIdx(code)    # 투자지표 페이지
+
+        # snapshot = fnguide_collector.parseFnguideSnapshot(snapshotHtml)
+        # finance = fnguide_collector.parseFnguideFinance(financeHtml)
+        fiRatio = fnguide_collector.parseFnguideFiRatio(fiRatioHtml)
+        investIdx = fnguide_collector.parseFnGuideInvestIdx(InvestIdxHtml)
         
         # result = { **snapshot, **finance, **fiRatio, **investIdx, 'code' : code }            
         result = {**fiRatio, **investIdx,  'code' : code }            
@@ -66,7 +67,7 @@ if __name__ == '__main__':
     collected = pd.DataFrame()
 
     if not os.path.exists(collectedFilePath):
-        krxStocks = kkmbaekkrx.getKrxStocks()
+        krxStocks = fnguide_collector.getKrxStocks()
         # collected = pd.DataFrame()
         
         with mp.Pool(processes = mp.cpu_count()) as pool:

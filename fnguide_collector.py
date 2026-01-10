@@ -6,21 +6,53 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from pandas import DataFrame, ExcelWriter
+from pathlib import Path
 
+def getKrxStocks():      
+    base_url: str = "https://kind.krx.co.kr/corpgeneral/corpList.do"
+    save_path: str = "./comp_list.html"
 
-def getKrxStocks():  
-    #code_df = pd.read_html('http://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13', header=0)[0]
+    """
+    KIND 상장종목현황 화면의 EXCEL 버튼과 동일한 요청을 날려 엑셀 파일을 저장한다.
+    필요한 경우 params 값을 F12 개발자 도구 내 Network 탭에서 확인 후 수정한다.
+    """
+
+    # 아래 params는 예시이며, 실제로는 개발자 도구에서
+    # EXCEL 버튼 클릭 시 listedIssueStatus.do?method=download 로 나가는
+    # 쿼리스트링을 그대로 옮겨 적어야 한다.
+    params = {
+        # 아래부터는 개발자도구에서 보고 그대로 세팅
+        "method": "download",   # fnDownload 안에서 지정되는 다운로드용 method 값
+        "searchType" : "13",  # 전체검색
+    }
+
+    headers = {
+        # 최소한의 헤더 (필요 시 개발자 도구에서 복사해서 추가)
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
+        ),
+        "Referer": "https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage",
+    }
+
+    resp = requests.get(base_url, params=params, headers=headers)
+    resp.raise_for_status()
+
+    Path(save_path).write_bytes(resp.content)    
+    print(f"saved: {save_path}")
+
+    code_df = pd.read_html(save_path, header=0)[0]      
     
-    code_df = pd.read_excel('./comp_list.xlsx', sheet_name='comp_list')
-    
-    code_df['종목코드'] = code_df['종목코드'].map("{:06d}".format)
     code_df = code_df[~code_df['회사명'].str.contains('스팩')]
+    code_df = code_df[~code_df['시장구분'].str.contains('코넥스')]
     
     code_df.reset_index(inplace=True)  
         
     code_df = code_df[['종목코드', '회사명', '업종', '주요제품']]
     code_df = code_df.rename(columns={'종목코드': 'code', '회사명':'name', '업종' : 'industry', '주요제품' : 'main_product'})
 
+    print("Data 예제: \n", code_df.head())
     return code_df
 
 def getFnguideFinance(code):

@@ -4,17 +4,17 @@ import multiprocessing as mp
 
 import pandas as pd
 
-import kkmbaekkrx
+import fnguide_collector
 
 def code_to_dict(code):
     try:
-        snapshotHtml = kkmbaekkrx.getFnGuideSnapshot(code)
-        financeHtml = kkmbaekkrx.getFnguideFinance(code)
-        fiRatioHtml = kkmbaekkrx.getFnGuideFiRatio(code)
-        
-        snapshot = kkmbaekkrx.parseFnguideSnapshot(snapshotHtml)
-        finance = kkmbaekkrx.parseFnguideFinance(financeHtml)
-        fiRatio = kkmbaekkrx.parseFnguideFiRatio(fiRatioHtml)
+        snapshotHtml = fnguide_collector.getFnGuideSnapshot(code)
+        financeHtml = fnguide_collector.getFnguideFinance(code)
+        fiRatioHtml = fnguide_collector.getFnGuideFiRatio(code)
+
+        snapshot = fnguide_collector.parseFnguideSnapshot(snapshotHtml)
+        finance = fnguide_collector.parseFnguideFinance(financeHtml)
+        fiRatio = fnguide_collector.parseFnguideFiRatio(fiRatioHtml)
         
         result = { **snapshot, **finance, **fiRatio, 'code' : code }            
         # result = {**fiRatio, 'code' : code }            
@@ -30,7 +30,7 @@ if __name__ == '__main__':
     collectedFilePath = "derived/ncav_{0}-{1:02d}-{2:02d}.csv".format(now.year, now.month, now.day)
 
     if not os.path.exists(collectedFilePath):
-        krxStocks = kkmbaekkrx.getKrxStocks()
+        krxStocks = fnguide_collector.getKrxStocks()
         collected = pd.DataFrame()
         
         with mp.Pool(processes = mp.cpu_count()) as pool:

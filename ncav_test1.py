@@ -1,4 +1,4 @@
-import kkmbaekkrx
+import fnguide_collector
 
-#print(kkmbaekkrx.parseFnguideFinance(kkmbaekkrx.getFnguideFinance('005930')))
-print(kkmbaekkrx.parseFnguideSnapshot(kkmbaekkrx.getFnGuideSnapshot('078930')))
+#print(fnguide_collector.parseFnguideFinance(fnguide_collector.getFnguideFinance('005930')))
+print(fnguide_collector.parseFnguideSnapshot(fnguide_collector.getFnGuideSnapshot('078930')))
