@@ -129,6 +129,15 @@ __pycache__/*
 # VSCode settings
 .vscode/
 
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# NVIDIA logs (accidentally created in project dir)
+NVIDIA Corporation/
+
 corpCode/
 derived/
 *.pdf

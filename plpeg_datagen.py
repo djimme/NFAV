@@ -1,6 +1,7 @@
 import datetime
 import os
 import multiprocessing as mp
+import sys
 
 import pandas as pd
 
@@ -40,17 +41,18 @@ def plpeg_calc(df):
     dfPEG['EPS_3yr'] = 100*(dfPEG['EPS_y-3']-dfPEG['EPS_y-6'])/dfPEG['EPS_y-6']
     dfPEG['PEG'] = dfPEG['PER_y-3']/dfPEG['EPS_3yr']
 
-    dfPEG = dfPEG[dfPEG['EPS_3yr'] > 0]
-    dfPEG = dfPEG[dfPEG['PEG'] <=0.5]
-    dfPEG = dfPEG[dfPEG['PER_y-3'] > 0]
-    dfPEG = dfPEG[dfPEG['부채비율_y-3'] <= 100]
+    # dfPEG = dfPEG[dfPEG['EPS_3yr'] > 0]
+    # dfPEG = dfPEG[dfPEG['PEG'] <=0.5]
+    # dfPEG = dfPEG[dfPEG['PER_y-3'] > 0]
+    # dfPEG = dfPEG[dfPEG['부채비율_y-3'] <= 100]
     
-    dfPEG = dfPEG.sort_values(by=['PEG', 'PER_y-3','부채비율_y-3'], ascending=[True, False, True],ignore_index=True)
+    # dfPEG = dfPEG.sort_values(by=['PEG', 'PER_y-3','부채비율_y-3'], ascending=[True, False, True],ignore_index=True)
 
     res_cols = ['code', '종목명', '업종', 'PEG', 'EPS_3yr', '부채비율_y-3']
-    dfRes = dfPEG[res_cols]
-    # dfRes.to_csv("./derived/dfRES.csv", encoding='utf-8-sig')
-    return dfRes
+    dfPEG_res = dfPEG[res_cols]    
+    # dfPEG_res.to_excel("./derived/dfPEG_res.xlsx", sheet_name="Sheet1", index=False)
+
+    return dfPEG_res
 
 ################################################
 def select_stocks(df):
@@ -62,30 +64,50 @@ def select_stocks(df):
 
 if __name__ == '__main__':
     now = datetime.datetime.now()    
-    collectedFilePath = "derived/plpeg_{0}-{1:02d}.csv".format(now.year, now.month)
-    PEGoutputFilePath = "derived/peg_output_{0}-{1:02d}.csv".format(now.year, now.month)
+    collectedFilePath = "derived/plpeg_{0}-{1:02d}.xlsx".format(now.year, now.month)
+    testcollectedFilePath = "derived/plpeg_test_{0}-{1:02d}.xlsx".format(now.year, now.month)
+    PEGoutputFilePath = "derived/peg_output_{0}-{1:02d}.xlsx".format(now.year, now.month)
     collected = pd.DataFrame()
+    stock_codes = []
 
-    if not os.path.exists(collectedFilePath):
-        krxStocks = fnguide_collector.getKrxStocks()
-        # collected = pd.DataFrame()
-        
+    # 명령행 인자로 테스트 모드 선택
+    # python plpeg_datagen.py                    -> 전체 종목의 PEG 계산(fnguide)
+    # python plpeg_datagen.py test               -> 005930, 078930, 011070 테스트
+
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        # test mode
+        stock_codes = ['005930','078930','011070']
+
         with mp.Pool(processes = mp.cpu_count()) as pool:
-            dictList = pool.map(code_to_dict, list(krxStocks['code']))
-            # dictList = pool.map(code_to_dict, list(['005930','078930','011070']))
-            
+            dictList = pool.map(code_to_dict, stock_codes)  
         collected = pd.DataFrame.from_records(dictList)
-        
-        ## Dataframe 확인용 CSV 파일 생성 코드
-        collected.to_csv(collectedFilePath, encoding='utf-8-sig')
-        
+
+        ## test Dataframe 확인용 CSV 파일 생성 코드
+        collected.to_excel(testcollectedFilePath, sheet_name="Sheet1", index=False)
+
     else:
-        collected = pd.read_csv(collectedFilePath)
-    
+        # full mode
+        if not os.path.exists(collectedFilePath):
+            # krxStocks = fnguide_collector.getKrxStocks()
+            krxStocks = krxStocks.getStocksFnguide()        
+            stock_codes = list(krxStocks[krxStocks['종목분류']=='Company']['종목코드'])       
+            # stock_codes = list(krxStocks['종목코드'])
+        
+            with mp.Pool(processes = mp.cpu_count()) as pool:
+                dictList = pool.map(code_to_dict, stock_codes)
+                
+            collected = pd.DataFrame.from_records(dictList)
+            
+            ## Dataframe 확인용 CSV 파일 생성 코드            
+            collected.to_excel(collectedFilePath, sheet_name="Sheet1", index=False)
+            
+        else:
+            collected = pd.read_excel(collectedFilePath)
+        
     peg_df = plpeg_calc(collected)
     
     ## Dataframe 확인용 CSV 파일 생성 코드
-    ## peg_df.to_csv(PEGoutputFilePath, encoding='utf-8-sig')
+    peg_df.to_excel(PEGoutputFilePath, sheet_name="Sheet1", index=False)
     
     ################################################
     stock_selected = select_stocks(peg_df)
