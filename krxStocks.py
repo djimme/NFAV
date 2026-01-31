@@ -6,8 +6,7 @@ import pandas as pd
 import requests
 from pandas import DataFrame, ExcelWriter
 from pathlib import Path
-from openpyxl import load_workbook
-from openpyxl.styles import Font, Alignment
+from fin_utils import save_styled_excel
 
 def getKrxStocks():         
     base_url: str = "https://kind.krx.co.kr/corpgeneral/corpList.do"
@@ -154,21 +153,5 @@ if __name__ == '__main__':
         else:
             df_complist = getStocksFnguide()
 
-        df_complist.to_excel(corp_list, sheet_name="CorpList", index=False)
-
-        # 엑셀 서식 적용
-        wb = load_workbook(corp_list)
-        ws = wb['CorpList']
-
-        # 폰트 및 정렬 스타일 정의
-        font_style = Font(name='맑은 고딕', size=10)
-        alignment_style = Alignment(horizontal='center', vertical='center')
-
-        # 모든 셀에 서식 적용
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-            for cell in row:
-                cell.font = font_style
-                cell.alignment = alignment_style
-
-        wb.save(corp_list)
+        save_styled_excel(df_complist, corp_list, sheet_name="CorpList")
         print(f"엑셀 파일 저장 완료: {corp_list}")

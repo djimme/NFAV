@@ -1,5 +1,6 @@
 import datetime
 import pandas as pd
+from fin_utils import save_styled_excel
 
 if __name__ == '__main__':
     now = datetime.datetime.now()    
@@ -30,8 +31,7 @@ if __name__ == '__main__':
 
     output = collected[['code', 'NCAV_R', '종목명', '당기순이익', '시가총액(보통주,억원)', '유동자산', '부채', ]]
 
-    # output.to_csv('ncav_output_2023-03-04.tsv', sep="\t", index=False)
-    output.to_csv('derived/ncav_output_{0}-{1:02d}-{2:02d}.csv'.format(now.year, now.month, now.day), sep="\t", index=False, encoding='utf-8-sig')
+    save_styled_excel(output, 'derived/ncav_output_{0}-{1:02d}-{2:02d}.xlsx'.format(now.year, now.month, now.day))
     
 
 

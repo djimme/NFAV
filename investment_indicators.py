@@ -11,6 +11,7 @@ from datetime import datetime
 import multiprocessing as mp
 import krxStocks
 from pathlib import Path
+from fin_utils import save_styled_excel
 
 
 def get_snapshot_html(stock_code, use_cache=True):
@@ -482,7 +483,7 @@ def save_to_excel(df, filename=None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"./derived/investment_indicators_{timestamp}.xlsx"
 
-    df.to_excel(filename, index=False, engine='openpyxl')
+    save_styled_excel(df, filename)
     print(f"Excel 파일 저장 완료: {filename}")
     return filename
 

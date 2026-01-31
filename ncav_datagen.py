@@ -4,6 +4,7 @@ import multiprocessing as mp
 
 import pandas as pd
 
+from fin_utils import save_styled_excel
 import fnguide_collector
 
 def code_to_dict(code):
@@ -27,7 +28,7 @@ def code_to_dict(code):
 if __name__ == '__main__':
     now = datetime.datetime.now()    
     # collectedFilePath = "derived/ncav_{0}-{1:02d}-{2:02d}.tsv".format(now.year, now.month, now.day)
-    collectedFilePath = "derived/ncav_{0}-{1:02d}-{2:02d}.csv".format(now.year, now.month, now.day)
+    collectedFilePath = "derived/ncav_{0}-{1:02d}-{2:02d}.xlsx".format(now.year, now.month, now.day)
 
     if not os.path.exists(collectedFilePath):
         krxStocks = fnguide_collector.getKrxStocks()
@@ -40,8 +41,7 @@ if __name__ == '__main__':
 
         collected = pd.DataFrame.from_records([dictList])
         print(collected)
-        # collected.to_csv(collectedFilePath, sep="\t")
-        collected.to_csv(collectedFilePath, sep="\t", encoding='utf-8-sig')
+        save_styled_excel(collected, collectedFilePath)
 
-    collected = pd.read_csv(collectedFilePath, sep="\t")
+    collected = pd.read_excel(collectedFilePath)
     print(collected)

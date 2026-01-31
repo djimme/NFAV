@@ -17,10 +17,11 @@ def getFnGuideSnapshot(code):
         os.makedirs(downloadedFileDirectory)
     content = None
     if not os.path.exists(downloadedFilePath):
-        response = requests.get(path)        
+        response = requests.get(path)
+        response.encoding = 'utf-8'
         with open(downloadedFilePath, "w", encoding="utf-8") as f:
             f.write(response.text)
-        content = response.content  
+        content = response.text
     else:
         content = open(downloadedFilePath, "r", encoding = "utf-8").read()
 

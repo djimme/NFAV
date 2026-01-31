@@ -1,5 +1,6 @@
 import datetime
 import pandas as pd
+from fin_utils import save_styled_excel
 
 if __name__ == '__main__':
     now = datetime.datetime.now()    
@@ -30,7 +31,7 @@ if __name__ == '__main__':
     print(collected[cols])
 
     output = collected[cols]
-    output.to_csv('derived/peg_output_{0}-{1:02d}.csv'.format(now.year, now.month), encoding='utf-8-sig')
+    save_styled_excel(output, 'derived/peg_output_{0}-{1:02d}.xlsx'.format(now.year, now.month))
     
 
 

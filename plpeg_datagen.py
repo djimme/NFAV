@@ -5,6 +5,7 @@ import sys
 
 import pandas as pd
 
+from fin_utils import save_styled_excel
 import fnguide_collector
 import krxStocks
 
@@ -82,8 +83,8 @@ if __name__ == '__main__':
             dictList = pool.map(code_to_dict, stock_codes)  
         collected = pd.DataFrame.from_records(dictList)
 
-        ## test Dataframe 확인용 CSV 파일 생성 코드
-        collected.to_excel(testcollectedFilePath, sheet_name="Sheet1", index=False)
+        ## test Dataframe 확인용 XLSX 파일 생성 코드
+        save_styled_excel(collected, testcollectedFilePath)
 
     else:
         # full mode
@@ -98,8 +99,8 @@ if __name__ == '__main__':
                 
             collected = pd.DataFrame.from_records(dictList)
             
-            ## Dataframe 확인용 CSV 파일 생성 코드            
-            collected.to_excel(collectedFilePath, sheet_name="Sheet1", index=False)
+            ## Dataframe 확인용 XLSX 파일 생성 코드            
+            save_styled_excel(collected, collectedFilePath)
             
         else:
             collected = pd.read_excel(collectedFilePath)
@@ -107,7 +108,7 @@ if __name__ == '__main__':
     peg_df = plpeg_calc(collected)
     
     ## Dataframe 확인용 CSV 파일 생성 코드
-    peg_df.to_excel(PEGoutputFilePath, sheet_name="Sheet1", index=False)
+    save_styled_excel(peg_df, PEGoutputFilePath)
     
     ################################################
     stock_selected = select_stocks(peg_df)
