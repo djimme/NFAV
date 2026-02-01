@@ -5,6 +5,7 @@ import multiprocessing as mp
 import pandas as pd
 
 from fin_utils import save_styled_excel
+import krxStocks
 import fnguide_collector
 
 def code_to_dict(code):
@@ -31,12 +32,12 @@ if __name__ == '__main__':
     collectedFilePath = "derived/ncav_{0}-{1:02d}-{2:02d}.xlsx".format(now.year, now.month, now.day)
 
     if not os.path.exists(collectedFilePath):
-        krxStocks = fnguide_collector.getKrxStocks()
+        krxStockslist = krxStocks.getKrxStocks()
         collected = pd.DataFrame()
         
         with mp.Pool(processes = mp.cpu_count()) as pool:
-            dictList = pool.map(code_to_dict, list(krxStocks['code']))
-
+            dictList = pool.map(code_to_dict, list(krxStockslist['code']))
+    
         # dictList = code_to_dict('005930')
 
         collected = pd.DataFrame.from_records([dictList])
