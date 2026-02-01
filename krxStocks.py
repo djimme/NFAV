@@ -50,8 +50,8 @@ def getKrxStocks():
     
     code_df.reset_index(inplace=True)  
         
-    code_df = code_df[['종목코드', '회사명', '업종', '주요제품']]
-    code_df = code_df.rename(columns={'종목코드': 'code', '회사명':'name', '업종' : 'industry', '주요제품' : 'main_product'})
+    code_df = code_df[['종목코드', '종목명', '업종', '주요제품']]
+    # code_df = code_df.rename(columns={'종목코드': 'code', '회사명':'name', '업종' : 'industry', '주요제품' : 'main_product'})
 
     print("[   Data 예제   ] \n", code_df.head())
     return code_df
@@ -142,16 +142,27 @@ def getStocksFnguide():
 
 
 if __name__ == '__main__':
+    import sys
+
+    # 명령행 인자로 테스트 모드 선택
+    # python krxStocks.py                    -> 전체 종목 수집 (KRX KIND)
+    # python krxStocks.py --fnguide          -> 전체 종목 수집 (FnGuide API)
+    
+    # FnGuide 사용 여부 플래그 (기본값: False)
+    use_fnguide_flag = '--fnguide' in sys.argv
+    if use_fnguide_flag:
+        sys.argv.remove('--fnguide')
+
     now = datetime.datetime.now()
     corp_list:str = "./corpCode/corplist_{0}{1:02d}.xlsx".format(now.year, now.month)
     flag = 0
 
     if not os.path.exists(corp_list):
         print("="*10 + " Get KRX Stocks " + "="*10)
-        if flag == 1:
-            df_complist = getKrxStocks()
-        else:
+        if use_fnguide_flag:
             df_complist = getStocksFnguide()
+        else:
+            df_complist = getKrxStocks()
 
         save_styled_excel(df_complist, corp_list, sheet_name="CorpList")
         print(f"엑셀 파일 저장 완료: {corp_list}")

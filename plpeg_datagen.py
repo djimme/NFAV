@@ -77,7 +77,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         # test mode
-        stock_codes = ['005930','078930','011070']
+        stock_codes = ['005930','078930','011070', '039490']
 
         with mp.Pool(processes = mp.cpu_count()) as pool:
             dictList = pool.map(code_to_dict, stock_codes)  
@@ -90,10 +90,15 @@ if __name__ == '__main__':
         # full mode
         if not os.path.exists(collectedFilePath):
             # krxStocks = fnguide_collector.getKrxStocks()
-            krxStocks = krxStocks.getStocksFnguide()        
-            stock_codes = list(krxStocks[krxStocks['종목분류']=='Company']['종목코드'])       
+            krxStockslist = krxStocks.getStocksFnguide()        
+            stock_list = krxStockslist[krxStockslist['종목분류']=='Company'].copy()       
             # stock_codes = list(krxStocks['종목코드'])
-        
+            # 시장정보에 '코넥스' 또는 'K-OTC' 포함된 데이터 제거
+            stock_list = stock_list[~stock_list['시장정보'].str.contains('코넥스|K-OTC', na=False)].copy()
+            # '종목명'에 '스팩'이 들어간 데이터 제거
+            stock_list = stock_list[~stock_list['종목명'].str.contains('스팩', na=False)].copy()
+            stock_codes = list(stock_list['종목코드'])
+
             with mp.Pool(processes = mp.cpu_count()) as pool:
                 dictList = pool.map(code_to_dict, stock_codes)
                 

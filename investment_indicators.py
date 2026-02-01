@@ -438,6 +438,11 @@ def collect_all_stocks(use_multiprocessing=True, use_fnguide=False):
 
         # Company 분류만 필터링
         stock_list = stock_list_all[stock_list_all['종목분류'] == 'Company'].copy()
+        # 시장정보에 '코넥스' 또는 'K-OTC' 포함된 데이터 제거
+        stock_list = stock_list[~stock_list['시장정보'].str.contains('코넥스|K-OTC', na=False)].copy()
+        # '종목명'에 '스팩'이 들어간 데이터 제거
+        stock_list = stock_list[~stock_list['종목명'].str.contains('스팩', na=False)].copy()
+        
         print(f"\n총 {len(stock_list)}개 Company 종목 발견 (전체 {len(stock_list_all)}개 중)")
 
         # (code, name) 튜플 리스트 생성
