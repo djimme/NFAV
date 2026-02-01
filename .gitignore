@@ -138,6 +138,7 @@ env/
 # NVIDIA logs (accidentally created in project dir)
 NVIDIA Corporation/
 
+comp_list.html
 corpCode/
 derived/
 *.pdf
