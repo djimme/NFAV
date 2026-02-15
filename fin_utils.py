@@ -1,3 +1,7 @@
+import datetime
+import os
+
+import requests
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -26,3 +30,33 @@ def save_styled_excel(df, filepath, sheet_name="Sheet1", index=False):
             cell.alignment = alignment
 
     wb.save(filepath)
+
+
+def fetch_fnguide_page(code, asp_page, menu_id, cache_prefix):
+    """FnGuide 페이지를 다운로드하고 캐싱하는 공통 함수
+
+    Parameters:
+        code         : 종목코드 (6자리 문자열)
+        asp_page     : FnGuide ASP 페이지명 (예: 'SVD_Finance.asp')
+        menu_id      : FnGuide NewMenuID 값 (예: '103')
+        cache_prefix : 캐시 디렉토리 접두어 (예: 'fnguide_finance_')
+
+    Returns:
+        str : HTML 문자열
+    """
+    now = datetime.datetime.now()
+    url = f"https://comp.fnguide.com/SVO2/ASP/{asp_page}?pGB=1&gicode=A{code}&cID=&MenuYn=Y&ReportGB=&NewMenuID={menu_id}&stkGb=701"
+
+    downloadedFileDirectory = 'derived/{0}{1}-{2:02d}'.format(cache_prefix, now.year, now.month)
+    downloadedFilePath = '{0}/{1}.html'.format(downloadedFileDirectory, code)
+
+    os.makedirs(downloadedFileDirectory, exist_ok=True)
+
+    if os.path.exists(downloadedFilePath):
+        return open(downloadedFilePath, "r", encoding="utf-8").read()
+
+    response = requests.get(url)
+    response.encoding = 'utf-8'
+    with open(downloadedFilePath, "w", encoding="utf-8") as f:
+        f.write(response.text)
+    return response.text

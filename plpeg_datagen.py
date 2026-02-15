@@ -6,20 +6,17 @@ import sys
 import pandas as pd
 
 from fin_utils import save_styled_excel
-import fnguide_collector
+import fnguideFinanceRatio as fnFR
+import fnguideInvestIdx as fnII
 import krxStocks
 
 def code_to_dict(code):
     try:
-        # snapshotHtml = fnguide_collector.getFnGuideSnapshot(code)      # Snapshot 페이지
-        # financeHtml = fnguide_collector.getFnguideFinance(code)        # 재무제표 페이지
-        fiRatioHtml = fnguide_collector.getFnGuideFiRatio(code)        # 재무비율 페이지
-        InvestIdxHtml = fnguide_collector.getFnGuideInvestIdx(code)    # 투자지표 페이지
+        fiRatioHtml = fnFR.getFnGuideFiRatio(code)        # 재무비율 페이지
+        InvestIdxHtml = fnII.getFnGuideInvestIdx(code)    # 투자지표 페이지
 
-        # snapshot = fnguide_collector.parseFnguideSnapshot(snapshotHtml)
-        # finance = fnguide_collector.parseFnguideFinance(financeHtml)
-        fiRatio = fnguide_collector.parseFnguideFiRatio(fiRatioHtml)
-        investIdx = fnguide_collector.parseFnGuideInvestIdx(InvestIdxHtml)
+        fiRatio = fnFR.parseFnguideFiRatio(fiRatioHtml)
+        investIdx = fnII.parseFnGuideInvestIdx(InvestIdxHtml)
         
         # result = { **snapshot, **finance, **fiRatio, **investIdx, 'code' : code }            
         result = {**fiRatio, **investIdx,  'code' : code }            

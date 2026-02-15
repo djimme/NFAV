@@ -18,7 +18,7 @@ if __name__ == '__main__':
             logger.info(f'Processing {code}')
             continue
         content = fnFI.getFnguideFinance(code)
-        result = fnFI.parseFnguideFinance(code, content)
+        result = fnFI.parseFnguideFinance(content)
         break
 
 

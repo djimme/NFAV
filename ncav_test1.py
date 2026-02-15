@@ -1,4 +1,5 @@
-import fnguide_collector
+import fnguideFinance as fnFI
+import fnguideSnapshot as fnSS
 
-#print(fnguide_collector.parseFnguideFinance(fnguide_collector.getFnguideFinance('005930')))
-print(fnguide_collector.parseFnguideSnapshot(fnguide_collector.getFnGuideSnapshot('078930')))
+#print(fnFI.parseFnguideFinance(fnFI.getFnguideFinance('005930')))
+print(fnSS.parseFnguideSnapshot(fnSS.getFnGuideSnapshot('078930')))

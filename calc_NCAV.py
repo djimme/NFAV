@@ -4,18 +4,19 @@ import datetime
 import os
 import multiprocessing as mp
 import krxStocks
-import fnguide_collector
+import fnguideFinance as fnFI
+import fnguideSnapshot as fnSS
 from fin_utils import save_styled_excel
 
 
 def code_to_dict(code):
     """개별 종목의 NCAV 계산에 필요한 데이터 수집"""
     try:
-        snapshotHtml = fnguide_collector.getFnGuideSnapshot(code)
-        financeHtml = fnguide_collector.getFnguideFinance(code)
+        snapshotHtml = fnSS.getFnGuideSnapshot(code)
+        financeHtml = fnFI.getFnguideFinance(code)
 
-        snapshot = fnguide_collector.parseFnguideSnapshot(snapshotHtml)
-        finance = fnguide_collector.parseFnguideFinance(financeHtml)
+        snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)
+        finance = fnFI.parseFnguideFinance(financeHtml)
 
         result = {**snapshot, **finance, 'code': code}
         return result
