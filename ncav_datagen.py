@@ -7,21 +7,20 @@ import pandas as pd
 from fin_utils import save_styled_excel
 import krxStocks
 import fnguideFinance as fnFI
-import fnguideSnapshot as fnSS
+# import fnguideSnapshot as fnSS  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
 import fnguideFinanceRatio as fnFR
 
 def code_to_dict(code):
     try:
-        snapshotHtml = fnSS.getFnGuideSnapshot(code)
+        # snapshotHtml = fnSS.getFnGuideSnapshot(code)  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
         financeHtml = fnFI.getFnguideFinance(code)
         fiRatioHtml = fnFR.getFnGuideFiRatio(code)
 
-        snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)
+        # snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
         finance = fnFI.parseFnguideFinance(financeHtml)
         fiRatio = fnFR.parseFnguideFiRatio(fiRatioHtml)
-        
-        result = { **snapshot, **finance, **fiRatio, 'code' : code }            
-        # result = {**fiRatio, 'code' : code }            
+
+        result = { **finance, **fiRatio, 'code' : code }            
         print(code)
         return result
     except Exception as e:
