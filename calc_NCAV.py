@@ -111,12 +111,11 @@ def main():
     # 데이터 수집
     if not os.path.exists(collectedFilePath):
         print("종목 리스트 로딩 중...")
-        # krxStocks = fnguide_collector.getKrxStocks()
-        krxStockslist = krxStocks.getKrxStocks()
+        krxStockslist, _ = krxStocks.getCorpList()
 
         print(f"데이터 수집 중... (총 {len(krxStockslist)} 종목)")
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            dictList = pool.map(code_to_dict, list(krxStockslist['code']))
+            dictList = pool.map(code_to_dict, list(krxStockslist['scode']))
         collected = pd.DataFrame(dictList)
         save_styled_excel(collected, collectedFilePath)
         print(f"데이터 저장 완료: {collectedFilePath}")

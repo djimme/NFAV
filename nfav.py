@@ -8,12 +8,12 @@ import fnguideFinance as fnFI
 
 if __name__ == '__main__':
 
-    df_krxStocks = kS.getKrxStocks()
+    df_krxStocks, _ = kS.getCorpList()
     df_nfav = pd.DataFrame(columns = ['code', 'name', '현금및현금성자산', '유동금융자산','장기금융자산','부채','비지배주주지분자본'])
 
     print(df_nfav)
 
-    for code in df_krxStocks['code']:
+    for code in df_krxStocks['scode']:
         if(code != '005930'):
             logger.info(f'Processing {code}')
             continue

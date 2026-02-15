@@ -34,11 +34,11 @@ if __name__ == '__main__':
     collectedFilePath = "derived/ncav_{0}-{1:02d}-{2:02d}.xlsx".format(now.year, now.month, now.day)
 
     if not os.path.exists(collectedFilePath):
-        krxStockslist = krxStocks.getKrxStocks()
+        krxStockslist, _ = krxStocks.getCorpList()
         collected = pd.DataFrame()
-        
+
         with mp.Pool(processes = mp.cpu_count()) as pool:
-            dictList = pool.map(code_to_dict, list(krxStockslist['code']))
+            dictList = pool.map(code_to_dict, list(krxStockslist['scode']))
     
         # dictList = code_to_dict('005930')
 

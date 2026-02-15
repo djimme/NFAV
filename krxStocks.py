@@ -44,14 +44,9 @@ def getKrxStocks():
         print(f"saved: {save_path}")
 
     code_df = pd.read_html(save_path, header=0)[0]      
-    
-    code_df = code_df[~code_df['회사명'].str.contains('스팩')]
-    code_df = code_df[~code_df['시장구분'].str.contains('코넥스')]
-    
-    code_df.reset_index(inplace=True)  
         
-    code_df = code_df[['종목코드', '종목명', '업종', '주요제품']]
-    # code_df = code_df.rename(columns={'종목코드': 'code', '회사명':'name', '업종' : 'industry', '주요제품' : 'main_product'})
+    code_df = code_df[['종목코드', '회사명', '업종', '주요제품']]
+    code_df = code_df.rename(columns={'회사명': '종목명'})
 
     print("[   Data 예제   ] \n", code_df.head())
     return code_df
@@ -141,28 +136,116 @@ def getStocksFnguide():
         return pd.DataFrame(columns=['종목분류', '종목코드', '종목명', '시장정보'])
 
 
+def collectCorpList():
+    """KRX KIND와 FnGuide API 데이터를 합쳐 종목 리스트를 생성한다.
+
+    FnGuide 기준 종목에 KRX의 업종/주요제품 정보를 병합한다.
+    KRX에 없는 종목은 'NA'로 채운다.
+
+    Returns:
+        DataFrame: 종목분류, 종목코드, 종목명, 시장정보, 업종, 주요제품
+    """
+    df_fnguide = getStocksFnguide()
+    df_krx = getKrxStocks()[['종목코드', '업종', '주요제품']]
+
+    # KRX 종목코드를 6자리 문자열로 변환 (pd.read_html이 정수로 읽는 경우 대비)
+    df_krx['종목코드'] = df_krx['종목코드'].astype(str).str.zfill(6)
+
+    df_merged = df_fnguide.merge(df_krx, on='종목코드', how='left')
+    df_merged[['업종', '주요제품']] = df_merged[['업종', '주요제품']].fillna('NA')
+
+    df_merged = df_merged[~df_merged['시장정보'].str.contains('코넥스|K-OTC')]
+
+    df_ETF_ETN = df_merged[df_merged['종목분류'].str.contains('ETF|ETN')][['종목분류', '종목코드', '종목명']]
+
+    df_merged = df_merged[~df_merged['종목분류'].str.contains('ETF|ETN')]
+    df_merged = df_merged[~df_merged['종목분류'].str.contains('SPAC|REITs')]
+    df_merged = df_merged[~df_merged['종목명'].str.contains('스팩')]
+
+    df_merged = df_merged.drop('종목분류', axis=1)
+
+    df_merged = df_merged.rename(columns={
+        '종목코드': 'scode',
+        '종목명': 'sname',
+        '시장정보': 'market',
+        '업종': 'industry',
+        '주요제품': 'products'
+    })
+
+    df_ETF_ETN = df_ETF_ETN.rename(columns={
+        '종목분류': 'category',
+        '종목코드': 'scode',
+        '종목명': 'sname'
+    })
+
+    print(f"\n[collectCorpList] 총 {len(df_merged)}개 종목 (업종 매핑: {len(df_merged[df_merged['industry'] != 'NA'])}개)")
+    return df_merged, df_ETF_ETN
+
+
+def getCorpList(mode='merged'):
+    """종목 리스트를 수집하여 Excel로 저장하고 DataFrame으로 반환한다.
+
+    동일 월 Excel이 있으면 읽어서 반환하고,
+    이전 달 Excel이 있으면 삭제 후 새로 수집한다.
+
+    Parameters:
+        mode: 'merged' (FnGuide + KRX 병합), 'krx' (KRX만), 'fnguide' (FnGuide만)
+
+    Returns:
+        tuple: (df_complist, df_etf_etn) - mode가 'merged'가 아니면 df_etf_etn은 None
+    """
+    now = datetime.datetime.now()
+    corpListPath = "./corpCode/corplist_{0}_{1}{2:02d}.xlsx".format(mode, now.year, now.month)
+    etfEtnPath = corpListPath.replace('.xlsx', '_ETF_ETN.xlsx')
+
+    # 동일 월 파일이 있으면 읽어서 반환
+    if os.path.exists(corpListPath):
+        print(f"[getCorpList] 기존 파일 사용: {corpListPath}")
+        df_complist = pd.read_excel(corpListPath, dtype={'종목코드': str})
+        df_etf_etn = None
+        if mode == 'merged' and os.path.exists(etfEtnPath):
+            df_etf_etn = pd.read_excel(etfEtnPath, dtype={'종목코드': str})
+        return df_complist, df_etf_etn
+
+    # 이전 달 파일 삭제
+    os.makedirs('./corpCode', exist_ok=True)
+    prefix = f"corplist_{mode}_"
+    for entry in os.listdir('./corpCode'):
+        if entry.startswith(prefix):
+            os.remove(os.path.join('./corpCode', entry))
+
+    # 데이터 수집
+    print("="*10 + " Collect Corp List " + "="*10)
+    df_etf_etn = None
+    if mode == 'krx':
+        df_complist = getKrxStocks()
+    elif mode == 'fnguide':
+        df_complist = getStocksFnguide()
+    else:
+        df_complist, df_etf_etn = collectCorpList()
+
+    # Excel 저장
+    save_styled_excel(df_complist, corpListPath, sheet_name="CorpList")
+    if df_etf_etn is not None:
+        save_styled_excel(df_etf_etn, etfEtnPath, sheet_name="ETF_ETN")
+
+    print(f"엑셀 파일 저장 완료: {corpListPath}")
+    return df_complist, df_etf_etn
+
+
 if __name__ == '__main__':
     import sys
 
     # 명령행 인자로 테스트 모드 선택
-    # python krxStocks.py                    -> 전체 종목 수집 (KRX KIND)
-    # python krxStocks.py --fnguide          -> 전체 종목 수집 (FnGuide API)
-    
-    # FnGuide 사용 여부 플래그 (기본값: False)
-    use_fnguide_flag = '--fnguide' in sys.argv
-    if use_fnguide_flag:
-        sys.argv.remove('--fnguide')
+    # python krxStocks.py               -> 종목 수집 (FnGuide + KRX 병합)
+    # python krxStocks.py --krx         -> KRX KIND만 수집
+    # python krxStocks.py --fnguide     -> FnGuide API만 수집
 
-    now = datetime.datetime.now()
-    corp_list:str = "./corpCode/corplist_{0}{1:02d}.xlsx".format(now.year, now.month)
-    flag = 0
+    if '--krx' in sys.argv:
+        mode = 'krx'
+    elif '--fnguide' in sys.argv:
+        mode = 'fnguide'
+    else:
+        mode = 'merged'
 
-    if not os.path.exists(corp_list):
-        print("="*10 + " Get KRX Stocks " + "="*10)
-        if use_fnguide_flag:
-            df_complist = getStocksFnguide()
-        else:
-            df_complist = getKrxStocks()
-
-        save_styled_excel(df_complist, corp_list, sheet_name="CorpList")
-        print(f"엑셀 파일 저장 완료: {corp_list}")
+    df_complist, df_etf_etn = getCorpList(mode)

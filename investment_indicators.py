@@ -3,71 +3,14 @@ FnGuide Snapshot 페이지에서 투자지표 추출
 - KSE/FICS 분야
 - Financial Highlight 테이블 (연결/연간 기준)
 """
-import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
 from datetime import datetime
 import multiprocessing as mp
 import krxStocks
-from pathlib import Path
+import fnguideSnapshot as fnSS
 from fin_utils import save_styled_excel
-
-
-def get_snapshot_html(stock_code, use_cache=True):
-    """
-    FnGuide Snapshot 페이지 HTML 가져오기 (캐싱 지원)
-
-    Args:
-        stock_code: 종목코드 (6자리)
-        use_cache: True면 로컬 캐시 사용
-
-    Returns:
-        HTML 문자열
-    """
-    # 캐시 디렉토리 설정
-    cache_dir = Path("./derived/fnguide_snapshot_cache")
-
-    # 캐시 디렉토리가 3개월 이상 지났으면 삭제
-    if cache_dir.exists():
-        import shutil
-        import time
-
-        # 디렉토리 생성 시간 확인
-        dir_mtime = cache_dir.stat().st_mtime
-        current_time = time.time()
-
-        # 3개월 = 90일 = 90 * 24 * 60 * 60 초
-        three_months_in_seconds = 90 * 24 * 60 * 60
-
-        # 3개월 이상 지났으면 삭제
-        if (current_time - dir_mtime) > three_months_in_seconds:
-            print(f"[캐시 정리] 캐시 디렉토리가 3개월 이상 지나 삭제합니다: {cache_dir}")
-            shutil.rmtree(cache_dir)
-
-    if use_cache:
-        # 캐시 디렉토리 생성
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_dir / f"{stock_code}.html"
-
-        # 캐시 파일이 있으면 사용
-        if cache_file.exists():
-            return cache_file.read_text(encoding='utf-8')
-
-    # HTML 다운로드
-    url = f"https://comp.fnguide.com/SVO2/ASP/SVD_Main.asp?pGB=1&gicode=A{stock_code}&cID=AA&MenuYn=Y&ReportGB=&NewMenuID=101&stkGb=701"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-    response = requests.get(url, headers=headers, timeout=30)
-    response.encoding = 'utf-8'
-    html = response.text
-
-    # 캐시 저장
-    if use_cache:
-        cache_file.write_text(html, encoding='utf-8')
-
-    return html
 
 
 def extract_company_name(soup):
@@ -306,7 +249,7 @@ def create_investment_dataframe(stock_code, stock_name=""):
     print(f"종목코드 {stock_code}의 투자지표를 추출합니다...")
 
     # HTML 가져오기 (캐싱)
-    html = get_snapshot_html(stock_code)
+    html = fnSS.getFnGuideSnapshot(stock_code)
 
     # HTML 파싱 (1회만)
     soup = BeautifulSoup(html, 'html.parser')
@@ -416,13 +359,12 @@ def process_single_stock(stock_info):
         return None
 
 
-def collect_all_stocks(use_multiprocessing=True, use_fnguide=False):
+def collect_all_stocks(use_multiprocessing=True):
     """
     KRX 전체 종목에 대해 투자지표 수집
 
     Args:
         use_multiprocessing: True면 멀티프로세싱 사용
-        use_fnguide: True면 getStocksFnguide() 사용, False면 getKrxStocks() 사용
 
     Returns:
         DataFrame
@@ -431,30 +373,11 @@ def collect_all_stocks(use_multiprocessing=True, use_fnguide=False):
     print("종목 리스트 가져오기")
     print("=" * 50)
 
-    if use_fnguide:
-        # FnGuide API에서 종목 리스트 가져오기
-        print("소스: FnGuide API")
-        stock_list_all = krxStocks.getStocksFnguide()
+    stock_list, _ = krxStocks.getCorpList()
+    print(f"\n총 {len(stock_list)}개 종목 발견")
 
-        # Company 분류만 필터링
-        stock_list = stock_list_all[stock_list_all['종목분류'] == 'Company'].copy()
-        # 시장정보에 '코넥스' 또는 'K-OTC' 포함된 데이터 제거
-        stock_list = stock_list[~stock_list['시장정보'].str.contains('코넥스|K-OTC', na=False)].copy()
-        # '종목명'에 '스팩'이 들어간 데이터 제거
-        stock_list = stock_list[~stock_list['종목명'].str.contains('스팩', na=False)].copy()
-        
-        print(f"\n총 {len(stock_list)}개 Company 종목 발견 (전체 {len(stock_list_all)}개 중)")
-
-        # (code, name) 튜플 리스트 생성
-        stock_infos = [(row['종목코드'], row['종목명']) for _, row in stock_list.iterrows()]
-    else:
-        # KRX KIND에서 종목 리스트 가져오기
-        print("소스: KRX KIND")
-        stock_list = krxStocks.getKrxStocks()
-        print(f"\n총 {len(stock_list)}개 종목 발견")
-
-        # (code, name) 튜플 리스트 생성
-        stock_infos = [(row['code'], row['name']) for _, row in stock_list.iterrows()]
+    # (code, name) 튜플 리스트 생성
+    stock_infos = [(row['scode'], row['sname']) for _, row in stock_list.iterrows()]
 
     print("\n" + "=" * 50)
     print("투자지표 수집 시작")
@@ -497,15 +420,9 @@ if __name__ == "__main__":
     import sys
 
     # 명령행 인자로 테스트 모드 선택
-    # python investment_indicators.py                    -> 전체 종목 수집 (KRX KIND)
-    # python investment_indicators.py --fnguide          -> 전체 종목 수집 (FnGuide API)
+    # python investment_indicators.py                    -> 전체 종목 수집
     # python investment_indicators.py test               -> 삼성전자만 테스트
     # python investment_indicators.py test 005930 000660 -> 지정한 종목들만 테스트
-
-    # FnGuide 사용 여부 플래그 (기본값: False)
-    use_fnguide_flag = '--fnguide' in sys.argv
-    if use_fnguide_flag:
-        sys.argv.remove('--fnguide')
 
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         # 테스트 모드
@@ -529,7 +446,7 @@ if __name__ == "__main__":
             final_df = create_investment_dataframe("005930")
     else:
         # 전체 종목 수집
-        final_df = collect_all_stocks(use_multiprocessing=True, use_fnguide=use_fnguide_flag)
+        final_df = collect_all_stocks(use_multiprocessing=True)
 
     if final_df is not None:
         # 결과 출력

@@ -86,15 +86,8 @@ if __name__ == '__main__':
     else:
         # full mode
         if not os.path.exists(collectedFilePath):
-            # krxStocks = fnguide_collector.getKrxStocks()
-            krxStockslist = krxStocks.getStocksFnguide()        
-            stock_list = krxStockslist[krxStockslist['종목분류']=='Company'].copy()       
-            # stock_codes = list(krxStocks['종목코드'])
-            # 시장정보에 '코넥스' 또는 'K-OTC' 포함된 데이터 제거
-            stock_list = stock_list[~stock_list['시장정보'].str.contains('코넥스|K-OTC', na=False)].copy()
-            # '종목명'에 '스팩'이 들어간 데이터 제거
-            stock_list = stock_list[~stock_list['종목명'].str.contains('스팩', na=False)].copy()
-            stock_codes = list(stock_list['종목코드'])
+            krxStockslist, _ = krxStocks.getCorpList()
+            stock_codes = list(krxStockslist['scode'])
 
             with mp.Pool(processes = mp.cpu_count()) as pool:
                 dictList = pool.map(code_to_dict, stock_codes)

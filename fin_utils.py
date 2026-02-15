@@ -1,5 +1,6 @@
 import datetime
 import os
+import shutil
 
 import requests
 from openpyxl import Workbook
@@ -51,6 +52,12 @@ def fetch_fnguide_page(code, asp_page, menu_id, cache_prefix):
     downloadedFilePath = '{0}/{1}.html'.format(downloadedFileDirectory, code)
 
     os.makedirs(downloadedFileDirectory, exist_ok=True)
+
+    # 이전 달 캐시 디렉토리 삭제
+    currentDirName = os.path.basename(downloadedFileDirectory)
+    for entry in os.listdir('derived'):
+        if entry.startswith(cache_prefix) and entry != currentDirName:
+            shutil.rmtree(os.path.join('derived', entry))
 
     if os.path.exists(downloadedFilePath):
         return open(downloadedFilePath, "r", encoding="utf-8").read()
