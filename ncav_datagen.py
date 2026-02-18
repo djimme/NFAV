@@ -7,16 +7,16 @@ import pandas as pd
 from fin_utils import save_styled_excel
 import krxStocks
 import fnguideFinance as fnFI
-# import fnguideSnapshot as fnSS  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
+# import fnguideSnapshot as fnSS  # TODO: fngCollect 결과 DataFrame으로 대체 예정
 import fnguideFinanceRatio as fnFR
 
 def code_to_dict(code):
     try:
-        # snapshotHtml = fnSS.getFnGuideSnapshot(code)  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
+        # snapshotHtml = fnSS.getFnGuideSnapshot(code)  # TODO: fngCollect 결과 DataFrame으로 대체 예정
         financeHtml = fnFI.getFnguideFinance(code)
         fiRatioHtml = fnFR.getFnGuideFiRatio(code)
 
-        # snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
+        # snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)  # TODO: fngCollect 결과 DataFrame으로 대체 예정
         finance = fnFI.parseFnguideFinance(financeHtml)
         fiRatio = fnFR.parseFnguideFiRatio(fiRatioHtml)
 

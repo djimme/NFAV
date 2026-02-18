@@ -5,17 +5,17 @@ import os
 import multiprocessing as mp
 import krxStocks
 import fnguideFinance as fnFI
-# import fnguideSnapshot as fnSS  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
+# import fnguideSnapshot as fnSS  # TODO: fngCollect 결과 DataFrame으로 대체 예정
 from fin_utils import save_styled_excel
 
 
 def code_to_dict(code):
     """개별 종목의 NCAV 계산에 필요한 데이터 수집"""
     try:
-        # snapshotHtml = fnSS.getFnGuideSnapshot(code)  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
+        # snapshotHtml = fnSS.getFnGuideSnapshot(code)  # TODO: fngCollect 결과 DataFrame으로 대체 예정
         financeHtml = fnFI.getFnguideFinance(code)
 
-        # snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)  # TODO: investment_indicators 결과 DataFrame으로 대체 예정
+        # snapshot = fnSS.parseFnguideSnapshot(snapshotHtml)  # TODO: fngCollect 결과 DataFrame으로 대체 예정
         finance = fnFI.parseFnguideFinance(financeHtml)
 
         result = {**finance, 'code': code}

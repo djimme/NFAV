@@ -1,103 +1,216 @@
 """
-FnGuide Snapshot 기반 투자지표 수집
+FnGuide 기반 투자지표 수집 공통 Entry
 
-krxStocks 종목 기본정보 + FnGuide Snapshot 투자지표를 결합하여
+krxStocks 종목 기본정보 + FnGuide 각 페이지 투자지표를 결합하여
 전체 종목 DataFrame을 생성하고 Excel로 저장한다.
+
+지원 모듈:
+  snapshot  - FnGuide Snapshot (SVD_Main)
+  finance   - FnGuide Finance (SVD_Finance)
+  ratio     - FnGuide Finance Ratio (SVD_FinanceRatio)
+  investidx - FnGuide Investment Index (SVD_Invest)
+  all       - 위 모듈 전체를 순차적으로 수집하여 하나로 합침
 """
-import re
 import pandas as pd
 from datetime import datetime
 import multiprocessing as mp
 import krxStocks
-from fnguideSnapshot import getFnGuideSnapshot, parseFnguideSnapshot
 from fin_utils import save_styled_excel
 
 
-def process_single_stock(stock_row):
+# ── 모듈 설정 ──────────────────────────────────────────────
+
+MODULE_CONFIG = {
+    'snapshot': {
+        'extra_base_fields': ['마켓분야', 'FICS분야'],
+        'skip_keys': {'종목명', '마켓분야', 'FICS분야'},
+        'indicator_order': [
+            '영업이익률(%)', '부채비율(%)', '유보율(%)', '지배주주순이익률(%)',
+            'PER(배)', 'EPS(원)', 'PBR(배)', 'BPS(원)',
+            'ROA(배)', 'ROE(배)', '배당수익률(%)', '발행주식수(천주)',
+        ],
+        'description': 'FnGuide Snapshot (SVD_Main)',
+        'output_prefix': 'snapshot',
+    },
+    'finance': {
+        'extra_base_fields': [],
+        'skip_keys': {'code', '종목명', '업종'},
+        'indicator_order': ['PER', 'PBR', '당기순이익', '유동자산', '부채'],
+        'description': 'FnGuide Finance (SVD_Finance)',
+        'output_prefix': 'finance',
+    },
+    'ratio': {
+        'extra_base_fields': [],
+        'skip_keys': {'code', '종목명', '업종'},
+        'indicator_order': ['PER', 'PBR', '부채비율', 'EPS증가율', 'EPS'],
+        'description': 'FnGuide Finance Ratio (SVD_FinanceRatio)',
+        'output_prefix': 'finance_ratio',
+    },
+    'investidx': {
+        'extra_base_fields': [],
+        'skip_keys': {'code'},
+        'indicator_order': ['PER'],
+        'description': 'FnGuide Investment Index (SVD_Invest)',
+        'output_prefix': 'invest_idx',
+    },
+    'all': {
+        'description': 'FnGuide 전체 (Snapshot + Finance + Ratio + InvestIdx)',
+        'output_prefix': 'investment_indicators',
+    },
+}
+
+# 'all' 모드에서 순차 처리할 모듈 목록
+_ALL_MODULES = ['snapshot', 'finance', 'ratio', 'investidx']
+
+
+def _get_module_fns(module_name):
+    """모듈명에 해당하는 (get_fn, parse_fn) 반환 (worker 프로세스 내에서 import)"""
+    if module_name == 'snapshot':
+        from fnguideSnapshot import getFnGuideSnapshot, parseFnguideSnapshot
+        return getFnGuideSnapshot, parseFnguideSnapshot
+    elif module_name == 'finance':
+        from fnguideFinance import getFnguideFinance, parseFnguideFinance
+        return getFnguideFinance, parseFnguideFinance
+    elif module_name == 'ratio':
+        from fnguideFinanceRatio import getFnGuideFiRatio, parseFnguideFiRatio
+        return getFnGuideFiRatio, parseFnguideFiRatio
+    elif module_name == 'investidx':
+        from fnguideInvestIdx import getFnGuideInvestIdx, parseFnGuideInvestIdx
+        return getFnGuideInvestIdx, parseFnGuideInvestIdx
+    else:
+        raise ValueError(f"Unknown module: {module_name}")
+
+
+def _get_indicator_order(module_name):
+    """모듈에 해당하는 indicator_order 반환 ('all'이면 전체 합산)"""
+    if module_name == 'all':
+        combined = []
+        for mod in _ALL_MODULES:
+            combined.extend(MODULE_CONFIG[mod]['indicator_order'])
+        return combined
+    return MODULE_CONFIG[module_name]['indicator_order']
+
+
+# ── 단일 종목 처리 ─────────────────────────────────────────
+
+def process_single_stock(args):
     """
     단일 종목 처리 (multiprocessing용)
 
     Args:
-        stock_row: dict - scode, sname, industry, products 키를 가진 딕셔너리
+        args: (stock_row, module_name) 튜플
+              stock_row - scode, sname, industry, products 키를 가진 딕셔너리
+              module_name - MODULE_CONFIG 키 ('all' 포함)
 
     Returns:
         dict 또는 None
     """
+    stock_row, module_name = args
+
+    modules_to_process = _ALL_MODULES if module_name == 'all' else [module_name]
+
     code = stock_row['scode']
-    try:
-        html = getFnGuideSnapshot(code)
-        indicators = parseFnguideSnapshot(html)
-        if indicators is None:
-            return None
 
-        # krxStocks 기본정보 + FnGuide 파싱 데이터 합치기
-        row = {
-            '종목코드': code,
-            '종목명': stock_row.get('sname') or indicators.get('종목명', ''),
-            '업종': stock_row.get('industry', ''),
-            '주요제품': stock_row.get('products', ''),
-            '마켓분야': indicators.get('마켓분야', ''),
-            'FICS분야': indicators.get('FICS분야', ''),
-        }
+    # krxStocks 기본정보 + FnGuide 파싱 데이터 합치기
+    row = {
+        '종목코드': code,
+        '종목명': stock_row.get('sname', ''),
+        '업종': stock_row.get('industry', ''),
+        '주요제품': stock_row.get('products', ''),
+    }
 
-        # 종목명, 마켓분야, FICS분야는 이미 위에서 처리했으므로 제외
-        for k, v in indicators.items():
-            if k not in ('종목명', '마켓분야', 'FICS분야'):
-                row[k] = v
+    has_data = False
 
-        return row
-    except Exception as e:
-        print(f"  ERROR - {stock_row.get('sname', '')}({code}): {e}")
+    for mod in modules_to_process:
+        config = MODULE_CONFIG[mod]
+        try:
+            get_fn, parse_fn = _get_module_fns(mod)
+            html = get_fn(code)
+            indicators = parse_fn(html)
+            if indicators is None:
+                continue
+
+            has_data = True
+
+            # 종목명 보완 (krxStocks에 없을 경우 파싱 데이터에서 가져오기)
+            if not row['종목명']:
+                row['종목명'] = indicators.get('종목명', '')
+
+            # 모듈별 추가 기본 필드 (예: snapshot의 마켓분야, FICS분야)
+            for field in config['extra_base_fields']:
+                row[field] = indicators.get(field, '')
+
+            # 파싱 데이터 중 skip_keys를 제외한 나머지 추가
+            for k, v in indicators.items():
+                if k not in config['skip_keys']:
+                    row[k] = v
+
+        except Exception as e:
+            print(f"  ERROR [{mod}] - {stock_row.get('sname', '')}({code}): {e}")
+
+    if not has_data:
         return None
 
+    return row
 
-def _order_columns(df):
+
+# ── 컬럼 정렬 ──────────────────────────────────────────────
+
+def _col_matches_indicator(col, indicator):
+    """컬럼명이 해당 지표에 속하는지 판별
+
+    매칭 패턴:
+      - 정확히 일치: '발행주식수(천주)' == '발행주식수(천주)'
+      - {indicator}_{suffix}: 'EPS_y-3', '당기순이익_2022/09'
+      - {year}_{indicator}: '2023_영업이익률(%)'
+    """
+    if col == indicator:
+        return True
+    if col.startswith(f'{indicator}_'):
+        return True
+    if f'_{indicator}' in col:
+        return True
+    return False
+
+
+def _order_columns(df, indicator_order):
     """
     최종 DataFrame의 컬럼 순서 정렬
 
-    컬럼명 패턴 '{year}_{indicator}{unit}'에서 연도를 추출하여 정렬한다.
+    indicator_order에 지정된 지표 순서대로 컬럼을 배치한다.
+    각 지표 내에서는 컬럼명 알파벳순(연도순/기간순)으로 정렬된다.
     """
     base_cols = ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야']
-
-    indicator_order = [
-        '영업이익률(%)', '부채비율(%)', '유보율(%)', '지배주주순이익률(%)',
-        'PER(배)', 'EPS(원)', 'PBR(배)', 'BPS(원)',
-        'ROA(배)', 'ROE(배)', '배당수익률(%)'
-    ]
-
-    # 컬럼명에서 연도 추출 (예: "2023_영업이익률(%)" → 2023)
-    years = set()
-    for col in df.columns:
-        match = re.match(r'^(\d{4})_', col)
-        if match:
-            years.add(int(match.group(1)))
-    sorted_years = sorted(years)
-
-    # 지표별 연도순 컬럼 생성
     ordered = [c for c in base_cols if c in df.columns]
-    for indicator in indicator_order:
-        for year in sorted_years:
-            col = f"{year}_{indicator}"
-            if col in df.columns:
-                ordered.append(col)
 
-    if '발행주식수(천주)' in df.columns:
-        ordered.append('발행주식수(천주)')
-
-    # ordered에 포함되지 않은 나머지 컬럼 추가
     remaining = [c for c in df.columns if c not in ordered]
-    ordered.extend(remaining)
+
+    for indicator in indicator_order:
+        matched = sorted(c for c in remaining if _col_matches_indicator(c, indicator))
+        ordered.extend(matched)
+        remaining = [c for c in remaining if c not in matched]
+
+    # indicator_order에 포함되지 않은 나머지 컬럼 추가
+    ordered.extend(sorted(remaining))
 
     return df[ordered]
 
 
-def collect_all_stocks(use_multiprocessing=True):
+# ── 전종목 수집 ────────────────────────────────────────────
+
+def collect_all_stocks(module_name='snapshot', use_multiprocessing=True):
     """
     KRX 전체 종목에 대해 투자지표 수집
+
+    Args:
+        module_name: MODULE_CONFIG 키 (snapshot, finance, ratio, investidx, all)
+        use_multiprocessing: 멀티프로세싱 사용 여부
 
     Returns:
         DataFrame 또는 None
     """
+    config = MODULE_CONFIG[module_name]
+
     print("=" * 50)
     print("종목 리스트 가져오기")
     print("=" * 50)
@@ -107,16 +220,17 @@ def collect_all_stocks(use_multiprocessing=True):
 
     # market 컬럼을 제외한 dict 리스트 생성
     stock_rows = stock_list.drop(columns=['market'], errors='ignore').to_dict('records')
+    args_list = [(row, module_name) for row in stock_rows]
 
     print("\n" + "=" * 50)
-    print("투자지표 수집 시작")
+    print(f"{config['description']} 데이터 수집 시작")
     print("=" * 50)
 
     if use_multiprocessing:
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            results = pool.map(process_single_stock, stock_rows)
+            results = pool.map(process_single_stock, args_list)
     else:
-        results = [process_single_stock(row) for row in stock_rows]
+        results = [process_single_stock(args) for args in args_list]
 
     valid_results = [r for r in results if r is not None]
     print(f"\n성공: {len(valid_results)}개 / 전체: {len(stock_list)}개")
@@ -126,46 +240,69 @@ def collect_all_stocks(use_multiprocessing=True):
         return None
 
     df = pd.DataFrame(valid_results)
-    return _order_columns(df)
+    return _order_columns(df, _get_indicator_order(module_name))
 
 
-def save_to_excel(df, filename=None):
+# ── Excel 저장 ─────────────────────────────────────────────
+
+def save_to_excel(df, module_name='snapshot', filename=None):
     """DataFrame을 Excel 파일로 저장"""
     if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"./derived/investment_indicators_{timestamp}.xlsx"
+        config = MODULE_CONFIG[module_name]
+        now = datetime.now()
+        filename = f"./derived/{config['output_prefix']}_{now.year}_{now.month:02d}.xlsx"
 
     save_styled_excel(df, filename)
     print(f"Excel 파일 저장 완료: {filename}")
     return filename
 
 
+# ── CLI ────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import sys
 
-    # python investment_indicators.py                    -> 전체 종목 수집
-    # python investment_indicators.py test               -> 삼성전자만 테스트
-    # python investment_indicators.py test 005930 000660 -> 지정한 종목들만 테스트
+    # python fngCollect.py snapshot                     -> snapshot 전종목 수집
+    # python fngCollect.py finance                      -> finance 전종목 수집
+    # python fngCollect.py ratio                        -> ratio 전종목 수집
+    # python fngCollect.py investidx                    -> investidx 전종목 수집
+    # python fngCollect.py all                          -> 전체 모듈 순차 수집
+    # python fngCollect.py snapshot test                -> snapshot 삼성전자만 테스트
+    # python fngCollect.py snapshot test 005930 000660  -> snapshot 지정 종목 테스트
 
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        if len(sys.argv) > 2:
-            test_codes = sys.argv[2:]
-        else:
-            test_codes = ['005930']
+    available = list(MODULE_CONFIG.keys())
+    args = sys.argv[1:]
 
+    if not args or args[0] not in available:
+        print(f"사용법: python fngCollect.py <module> [test [codes...]]")
+        print(f"  module: {', '.join(available)}")
+        sys.exit(1)
+
+    module_name = args[0]
+    rest = args[1:]
+
+    print(f"모듈: {MODULE_CONFIG[module_name]['description']}")
+
+    if rest and rest[0] == "test":
+        test_codes = rest[1:] if len(rest) > 1 else ['005930']
         print(f"테스트 모드: {len(test_codes)}개 종목")
+
         results = []
         for code in test_codes:
-            row = process_single_stock({'scode': code, 'sname': '', 'industry': '', 'products': ''})
+            row = process_single_stock(
+                ({'scode': code, 'sname': '', 'industry': '', 'products': ''}, module_name)
+            )
             if row is not None:
                 results.append(row)
 
         if results:
-            final_df = _order_columns(pd.DataFrame(results))
+            final_df = _order_columns(
+                pd.DataFrame(results), _get_indicator_order(module_name)
+            )
         else:
             final_df = None
     else:
-        final_df = collect_all_stocks(use_multiprocessing=True)
+        final_df = collect_all_stocks(module_name=module_name, use_multiprocessing=True)
 
     if final_df is not None:
         print(f"\n=== 추출된 데이터 ===")
@@ -173,7 +310,7 @@ if __name__ == "__main__":
         print(f"전체 컬럼 수: {len(final_df.columns)}")
 
         print(f"\n=== Excel 저장 ===")
-        filename = save_to_excel(final_df)
+        filename = save_to_excel(final_df, module_name=module_name)
 
         print(f"\nOK 성공적으로 완료되었습니다!")
         print(f"  파일: {filename}")
