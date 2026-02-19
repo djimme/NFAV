@@ -15,7 +15,7 @@ import pandas as pd
 from datetime import datetime
 import multiprocessing as mp
 import krxStocks
-from fin_utils import save_styled_excel
+from fin_utils import save_styled_excel, save_styled_excel_multisheet
 
 
 # ── 모듈 설정 ──────────────────────────────────────────────
@@ -40,9 +40,23 @@ MODULE_CONFIG = {
         'output_prefix': 'finance',
     },
     'ratio': {
-        'extra_base_fields': [],
-        'skip_keys': {'code', '종목명', '업종'},
-        'indicator_order': ['PER', 'PBR', '부채비율', 'EPS증가율', 'EPS'],
+        'extra_base_fields': ['마켓분야', 'FICS분야'],
+        'skip_keys': {'종목명', '마켓분야', 'FICS분야'},
+        'indicator_order': [
+            # 안정성
+            '유동비율', '부채비율', '유보율', '순차입금비율', '이자보상배율', '자기자본비율',
+            '예대율', '유가증권보유율', '운용자산비율',
+            # 성장성
+            '매출증가율', '판관비증가율', 'EPS증가율', '영업이익증가율', 'EBITDA증가율',
+            '순이익증가율', '총자산증가율', '대출채권증가율', '예수부채증가율',
+            # 수익성 (ROIC → ROE 순서: 부분문자열 매칭 오작동 방지)
+            '매출총이익률', '세전계속이익률', '영업이익률', 'EBITDA마진율',
+            'ROIC', 'ROA', 'ROE',
+            '판관비율', 'NIM', '예대마진율',
+            '순이익률', '운용자산이익률', '손해율', '순사업비율',
+            # 활동성
+            '총자산회전율', '타인자본회전율', '자기자본회전율', '순운전자본회전율',
+        ],
         'description': 'FnGuide Finance Ratio (SVD_FinanceRatio)',
         'output_prefix': 'finance_ratio',
     },
@@ -245,14 +259,83 @@ def collect_all_stocks(module_name='snapshot', use_multiprocessing=True):
 
 # ── Excel 저장 ─────────────────────────────────────────────
 
+def _filter_industry_columns(df, indicators):
+    """업종 지표 목록에 매칭되는 컬럼만 추출 (기본 컬럼 포함, 정렬 유지)"""
+    base_cols = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야'] if c in df.columns]
+    remaining = [c for c in df.columns if c not in base_cols]
+
+    ordered = []
+    for indicator in indicators:
+        matched = sorted(c for c in remaining if _col_matches_indicator(c, indicator))
+        ordered.extend(matched)
+        remaining = [c for c in remaining if c not in matched]
+
+    return base_cols + ordered
+
+
+def _build_ratio_sheets(df):
+    """
+    Finance Ratio DataFrame을 업종별 시트 리스트로 분리
+
+    Returns:
+        [(sheet_name, DataFrame), ...] — 데이터가 있는 업종만 포함
+    """
+    from fnguideFinanceRatio import (
+        detect_industry_type, INDUSTRY_INDICATORS,
+        INDUSTRY_TYPE_MANUFACTURING, INDUSTRY_TYPE_BANKING,
+        INDUSTRY_TYPE_SECURITIES, INDUSTRY_TYPE_INSURANCE,
+        INDUSTRY_TYPE_VENTURE,
+    )
+
+    industry_order = [
+        INDUSTRY_TYPE_MANUFACTURING,
+        INDUSTRY_TYPE_BANKING,
+        INDUSTRY_TYPE_SECURITIES,
+        INDUSTRY_TYPE_INSURANCE,
+        INDUSTRY_TYPE_VENTURE,
+    ]
+
+    market_col = '마켓분야' if '마켓분야' in df.columns else None
+    fics_col   = 'FICS분야' if 'FICS분야' in df.columns else None
+
+    def get_type(row):
+        market = row[market_col] if market_col else ''
+        fics   = row[fics_col]   if fics_col   else ''
+        return detect_industry_type(market, fics)
+
+    df = df.copy()
+    df['_itype'] = df.apply(get_type, axis=1)
+
+    sheets = []
+    for itype in industry_order:
+        idf = df[df['_itype'] == itype].drop(columns=['_itype']).reset_index(drop=True)
+        if idf.empty:
+            continue
+        cols = _filter_industry_columns(idf, INDUSTRY_INDICATORS.get(itype, []))
+        # 값이 하나라도 있는 컬럼만 유지 (기본 컬럼은 항상 포함)
+        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야'] if c in cols]
+        indicator_cols = [c for c in cols if c not in base and idf[c].notna().any()]
+        sheets.append((itype, idf[base + indicator_cols]))
+
+    return sheets
+
+
 def save_to_excel(df, module_name='snapshot', filename=None):
-    """DataFrame을 Excel 파일로 저장"""
+    """DataFrame을 Excel 파일로 저장 (ratio 모듈은 업종별 멀티시트)"""
     if filename is None:
         config = MODULE_CONFIG[module_name]
         now = datetime.now()
         filename = f"./derived/{config['output_prefix']}_{now.year}_{now.month:02d}.xlsx"
 
-    save_styled_excel(df, filename)
+    if module_name == 'ratio':
+        sheets = _build_ratio_sheets(df)
+        if sheets:
+            save_styled_excel_multisheet(sheets, filename)
+        else:
+            save_styled_excel(df, filename)
+    else:
+        save_styled_excel(df, filename)
+
     print(f"Excel 파일 저장 완료: {filename}")
     return filename
 

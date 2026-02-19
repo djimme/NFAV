@@ -33,6 +33,41 @@ def save_styled_excel(df, filepath, sheet_name="Sheet1", index=False):
     wb.save(filepath)
 
 
+def save_styled_excel_multisheet(sheets, filepath):
+    """여러 시트를 담은 서식 적용 Excel 파일 저장
+
+    Args:
+        sheets  : [(sheet_name, DataFrame), ...] 순서 있는 시트 목록
+        filepath: 저장 경로 (예: 'derived/output.xlsx')
+
+    서식:
+        - 글꼴: 맑은 고딕, 10pt
+        - 맞춤: 상하 가운데, 좌우 가운데
+    """
+    wb = Workbook()
+    font = Font(name="맑은 고딕", size=10)
+    alignment = Alignment(horizontal="center", vertical="center")
+
+    first = True
+    for sheet_name, df in sheets:
+        if first:
+            ws = wb.active
+            ws.title = sheet_name
+            first = False
+        else:
+            ws = wb.create_sheet(title=sheet_name)
+
+        for row in dataframe_to_rows(df, index=False, header=True):
+            ws.append(row)
+
+        for row_cells in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column):
+            for cell in row_cells:
+                cell.font = font
+                cell.alignment = alignment
+
+    wb.save(filepath)
+
+
 def fetch_fnguide_page(code, asp_page, menu_id, cache_prefix):
     """FnGuide 페이지를 다운로드하고 캐싱하는 공통 함수
 

@@ -1,83 +1,387 @@
-import logging
+"""
+FnGuide FinanceRatio 페이지 (SVD_FinanceRatio.asp) 데이터 수집 및 파싱
 
-import pandas as pd
+업종별 재무비율 수집:
+- 연결 누적 (Annual)  : 연도별 재무비율 → 컬럼 형식 {YYYY}_{지표명}
+- 연결 3개월 (Quarterly): 분기별 재무비율 → 컬럼 형식 {YYYY/MM}_{지표명}
+
+업종별 지표 (통합 컬럼명으로 매핑):
+  제조업 : 유동비율, 부채비율, 유보율, 순차입금비율, 이자보상배율, 자기자본비율,
+           매출액증가율→매출증가율, 판관비증가율, EBIT증가율→영업이익증가율,
+           EBITDA증가율, EPS증가율, 매출총이익률, 세전계속사업이익률→세전계속이익률,
+           EBIT마진율→영업이익률, EBITDA마진율, ROA, ROE, ROIC,
+           총자산회전율, 타인자본회전율, 자기자본회전율, 순운전자본회전율
+  은행업 : 예대율, 이자수익증가율→매출증가율, 영업이익증가율, 순이익증가율, EPS증가율,
+           총자산증가율, 대출채권증가율, 예수부채증가율, 판관비율,
+           총자산이익률(ROA)→ROA, 순이자마진율(NIM)→NIM, 예대마진율, 자기자본이익률(ROE)→ROE
+  증권업 : 예대율, 유가증권보유율, 부채비율, 유보율,
+           순영업수익증가율→매출증가율, 영업이익증가율, 순이익증가율, EPS증가율,
+           영업이익율→영업이익률, 총자산이익률(ROA)→ROA, 자기자본이익률(ROE)→ROE
+  보험업 : 운용자산비율, 자기자본비율,
+           보험료수익증가율→매출증가율, 영업이익증가율, 순이익증가율, EPS증가율,
+           영업이익율→영업이익률, 순이익률, 운용자산이익률,
+           총자산이익률(ROA)→ROA, 자기자본이익률(ROE)→ROE, 손해율, 순사업비율
+
+Public API:
+  getFnGuideFiRatio(code)    : HTML 가져오기 (캐싱)
+  parseFnguideFiRatio(html)  : 재무비율 데이터 추출 → dict 또는 None
+"""
+import re
+
 from bs4 import BeautifulSoup
 
 from fin_utils import fetch_fnguide_page
 
 
+# 업종별 원본 지표명 → 통합 컬럼명 매핑
+INDICATOR_NAME_MAP = {
+    # 안정성
+    '유동비율': '유동비율',
+    '부채비율': '부채비율',
+    '유보율': '유보율',
+    '순차입금비율': '순차입금비율',
+    '이자보상배율': '이자보상배율',
+    '자기자본비율': '자기자본비율',
+    '예대율': '예대율',
+    '유가증권보유율': '유가증권보유율',
+    '운용자산비율': '운용자산비율',
+    # 성장성 (업종별 매출에 해당하는 항목 통합)
+    '매출액증가율': '매출증가율',
+    '이자수익증가율': '매출증가율',      # 은행업
+    '순영업수익증가율': '매출증가율',     # 증권업
+    '보험료수익증가율': '매출증가율',     # 보험업
+    '판관비증가율': '판관비증가율',
+    'EBIT증가율': '영업이익증가율',       # 제조업
+    '영업이익증가율': '영업이익증가율',
+    'EBITDA증가율': 'EBITDA증가율',
+    'EPS증가율': 'EPS증가율',
+    '순이익증가율': '순이익증가율',
+    '총자산증가율': '총자산증가율',
+    '대출채권증가율': '대출채권증가율',
+    '예수부채증가율': '예수부채증가율',
+    # 수익성
+    '매출총이익률': '매출총이익률',
+    '세전계속사업이익률': '세전계속이익률',
+    'EBIT마진율': '영업이익률',           # 제조업
+    '영업이익율': '영업이익률',
+    '영업이익률': '영업이익률',
+    'EBITDA마진율': 'EBITDA마진율',
+    'ROA': 'ROA',
+    '총자산이익률': 'ROA',
+    'ROE': 'ROE',
+    '자기자본이익률': 'ROE',
+    'ROIC': 'ROIC',
+    '판관비율': '판관비율',
+    '순이자마진율': 'NIM',
+    '예대마진율': '예대마진율',
+    '순이익률': '순이익률',
+    '운용자산이익률': '운용자산이익률',
+    '손해율': '손해율',
+    '순사업비율': '순사업비율',
+    # 활동성
+    '총자산회전율': '총자산회전율',
+    '타인자본회전율': '타인자본회전율',
+    '자기자본회전율': '자기자본회전율',
+    '순운전자본회전율': '순운전자본회전율',
+}
+
+
+# 업종 타입 상수
+INDUSTRY_TYPE_MANUFACTURING = '제조업'
+INDUSTRY_TYPE_BANKING       = '은행업'
+INDUSTRY_TYPE_SECURITIES    = '증권업'
+INDUSTRY_TYPE_INSURANCE     = '보험업'
+INDUSTRY_TYPE_VENTURE       = '창투업'
+
+# 업종별 관련 통합 지표 목록 (시트 컬럼 필터링에 사용)
+INDUSTRY_INDICATORS = {
+    INDUSTRY_TYPE_MANUFACTURING: [
+        '유동비율', '부채비율', '유보율', '순차입금비율', '이자보상배율', '자기자본비율',
+        '매출증가율', '판관비증가율', 'EPS증가율', '영업이익증가율', 'EBITDA증가율',
+        '매출총이익률', '세전계속이익률', '영업이익률', 'EBITDA마진율',
+        'ROIC', 'ROA', 'ROE',
+        '총자산회전율', '타인자본회전율', '자기자본회전율', '순운전자본회전율',
+    ],
+    INDUSTRY_TYPE_BANKING: [
+        '예대율',
+        '매출증가율', '영업이익증가율', '순이익증가율', 'EPS증가율',
+        '총자산증가율', '대출채권증가율', '예수부채증가율',
+        '판관비율', 'ROA', 'NIM', '예대마진율', 'ROE',
+    ],
+    INDUSTRY_TYPE_SECURITIES: [
+        '예대율', '유가증권보유율', '부채비율', '유보율',
+        '매출증가율', '영업이익증가율', '순이익증가율', 'EPS증가율',
+        '영업이익률', 'ROA', 'ROE',
+    ],
+    INDUSTRY_TYPE_INSURANCE: [
+        '운용자산비율', '자기자본비율',
+        '매출증가율', '영업이익증가율', '순이익증가율', 'EPS증가율',
+        '영업이익률', '순이익률', '운용자산이익률', 'ROA', 'ROE',
+        '손해율', '순사업비율',
+    ],
+    INDUSTRY_TYPE_VENTURE: [
+        '부채비율', '유보율',
+        '매출증가율', '영업이익증가율', '순이익증가율', 'EPS증가율',
+        '영업이익률', '순이익률', 'ROA', 'ROE',
+    ],
+}
+
+
+def detect_industry_type(market_sector, fics_sector):
+    """
+    마켓분야 + FICS분야 텍스트로 업종 타입 분류
+
+    분류 기준:
+      보험업: 마켓분야에 '보험' 포함 AND FICS분야에 '보험' 포함
+      은행업: 마켓분야에 '금융' 또는 '은행' 포함 AND FICS분야에 '상업은행' 포함
+      증권업: 마켓분야에 '금융' 또는 '증권' 포함 AND FICS분야에 '증권' 포함
+      창투업: 마켓분야에 '금융' 포함 AND FICS분야에 '창업투자 및 종금' 포함
+      그 외: 제조업
+
+    Args:
+        market_sector: 마켓분야 문자열
+        fics_sector  : FICS분야 문자열
+
+    Returns:
+        str: INDUSTRY_TYPE_* 상수 중 하나 (기본값: 제조업)
+    """
+    market = market_sector if isinstance(market_sector, str) else ''
+    fics   = fics_sector   if isinstance(fics_sector,   str) else ''
+
+    if '보험' in market and '보험' in fics:
+        return INDUSTRY_TYPE_INSURANCE
+    if ('금융' in market or '은행' in market) and '상업은행' in fics:
+        return INDUSTRY_TYPE_BANKING
+    if ('금융' in market or '증권' in market) and '증권' in fics:
+        return INDUSTRY_TYPE_SECURITIES
+    if '금융' in market and '창업투자 및 종금' in fics:
+        return INDUSTRY_TYPE_VENTURE
+    return INDUSTRY_TYPE_MANUFACTURING
+
+
 def getFnGuideFiRatio(code):
+    """FnGuide FinanceRatio HTML 가져오기 (캐싱)"""
     return fetch_fnguide_page(code, 'SVD_FinanceRatio.asp', '104', 'fnguide_FinanceRatio_')
 
 
-def parseFnguideFiRatio(content):
-    logger = logging.getLogger("kkmbaekkrx")
-    html = BeautifulSoup(content, 'html.parser')
-    body = html.find('body')
+def parseFnguideFiRatio(html):
+    """
+    FinanceRatio HTML에서 연결 누적/3개월 재무비율 데이터 추출
 
-    result = {}
-    result['code'] = '??'
-    result['종목명'] = html.select('#giName')[0].get_text()
-    result['업종'] = html.select('#compBody > div.section.ul_corpinfo > div.corp_group1 > p > span.stxt.stxt2')[0].get_text()
-    result['PER'] = html.select('#corp_group2 > dl:nth-child(1) > dd')[0].get_text()
-    result['PBR'] = html.select('#corp_group2 > dl:nth-child(4) > dd')[0].get_text()
+    업종(제조업/은행업/증권업/보험업)에 따라 다른 지표를
+    INDICATOR_NAME_MAP을 통해 통합 컬럼명으로 자동 매핑한다.
 
-    재무비율누적헤더 = None
-    tFiRatio = html.find('table', {"class" : 'us_table_ty1 h_fix zigbg_no'})
+    Args:
+        html: FnGuide FinanceRatio HTML 문자열
 
-    # 년도별 부채비율
-    debt_ratios = html.find('tr', {'id':'p_grid1_3'}).find_all('td')
-    cnt = len(debt_ratios)
-    for dR in debt_ratios:
-        tDR = '부채비율_y-'+str(cnt)
-        result[tDR] = pd.to_numeric(dR.get_text(strip=True).replace(",", ""))
-        cnt -= 1
-        # print(result[tDR])
+    Returns:
+        dict: 종목명, 마켓분야, FICS분야, 연도별/분기별 재무비율
+        None: 연결 누적 테이블이 없는 경우
+    """
+    soup = BeautifulSoup(html, 'html.parser')
 
-    # 년도별 EPS 증가율 및 년도별 EPS
-    EPS_incR = html.find('tr', {'id':'p_grid1_12'}).find_all('td')
-    cnt = len(EPS_incR)
-    for epsInc in EPS_incR:
-        tepsInc = 'EPS증가율_y-'+str(cnt)
-        result[tepsInc] = pd.to_numeric(epsInc.get_text(strip=True).replace(",",""))
-        cnt -= 1
-        # print(result[tepsInc])
+    data = {}
+    data['종목명'] = _parse_company_name(soup)
 
-    # 과거 년도별 EPS
-    tEPSs = html.find_all("tr", {"class":"c_grid1_12 rwf acd_dep2_sub"})
-    # print(tEPSs)
+    kse_sector, fics_sector = _parse_kse_fics(soup)
+    data['마켓분야'] = kse_sector
+    data['FICS분야'] = fics_sector
 
-    foundEPSs = tEPSs[0].find_all('td')
-    cnt = len(foundEPSs) + 1
+    # 연결 누적 (Annual) — 컬럼 형식: {YYYY}_{지표명}
+    annual_data = _parse_grid_section(soup, 'grid1', period_format='year')
+    if annual_data is None:
+        return None
+    data.update(annual_data)
 
-    # 과거 년도별 EPS의 1년전 EPS 은 EPS(-1Y)를 활용
-    EPS = 'EPS_y-'+str(cnt)
-    result[EPS] = pd.to_numeric(tEPSs[1].find('td').get_text(strip=True).replace(",",""))
-    # print(result[EPS])
-    cnt -= 1
+    # 연결 3개월 (Quarterly) — 컬럼 형식: {YYYY/MM}_{지표명}
+    quarterly_data = _parse_grid_section(soup, 'grid2', period_format='yearmonth')
+    if quarterly_data is not None:
+        data.update(quarterly_data)
 
-    for EPSs in foundEPSs:
-        EPS = 'EPS_y-'+ str(cnt)
-        result[EPS] = pd.to_numeric(EPSs.get_text(strip=True).replace(",",""))
-        # print(result[EPS])
-        cnt -= 1
+    return data
 
-    # 분기별 EPS 증가율(YoY)
-    EPS_incQR = html.find('tr', {'id':'p_grid2_4'}).find_all('td')
-    cnt = len(EPS_incQR)
-    for epsInc in EPS_incQR:
-        tepsInc = 'EPS증가율_q-'+str(cnt)
-        result[tepsInc] = pd.to_numeric(epsInc.get_text(strip=True).replace(",",""))
-        cnt -= 1
-        # print(result[tepsInc])
 
-    # 과거 분기별 EPS
-    foundEPSs = html.find("tr", {"class":"c_grid2_4 rwf acd_dep2_sub"}).find_all('td')
-    cnt = len(foundEPSs)
-    for EPSs in foundEPSs:
-        EPS = 'EPS_q-'+ str(cnt)
-        result[EPS] = pd.to_numeric(EPSs.get_text(strip=True).replace(",",""))
-        # print(result[EPS])
-        cnt -= 1
+# --- Private parse helpers ---
 
-    return result
+def _parse_company_name(soup):
+    """페이지 title에서 종목명 추출"""
+    title = soup.find('title')
+    if title:
+        title_text = title.get_text(strip=True)
+        match = re.match(r'^([^(]+)\(A\d+\)', title_text)
+        if match:
+            return match.group(1).strip()
+    return ''
+
+
+def _parse_kse_fics(soup):
+    """stxt_group에서 KSE, FICS 분야 추출 → (kse_sector, fics_sector)"""
+    kse_sector = ''
+    fics_sector = ''
+
+    stxt_group = soup.find('p', class_='stxt_group')
+    if not stxt_group:
+        return kse_sector, fics_sector
+
+    for span in stxt_group.find_all('span', class_='stxt'):
+        text = span.get_text(strip=True).replace('\xa0', ' ')
+
+        if text.startswith('FICS'):
+            fics_sector = re.sub(r'^FICS\s+', '', text).strip()
+        else:
+            for prefix in ('KSE', 'KOSDAQ', 'K-OTC', 'KONEX'):
+                if text.startswith(prefix):
+                    kse_sector = re.sub(rf'^{prefix}\s+', '', text).strip()
+                    break
+
+    return kse_sector, fics_sector
+
+
+def _parse_grid_section(soup, grid_id, period_format='year'):
+    """
+    grid1(연결 누적) 또는 grid2(연결 3개월) 섹션에서 재무비율 추출
+
+    Args:
+        soup        : BeautifulSoup 객체
+        grid_id     : 'grid1' (연간) 또는 'grid2' (분기)
+        period_format: 'year' → {YYYY}, 'yearmonth' → {YYYY/MM}
+
+    Returns:
+        dict: {'{period}_{unified_indicator}': float, ...}
+        None: 해당 grid 테이블 없음
+    """
+    # p_grid1_* 또는 p_grid2_* ID를 가진 첫 번째 tr로 부모 table 찾기
+    sample_row = soup.find('tr', id=re.compile(rf'^p_{grid_id}_\d+$'))
+    if not sample_row:
+        return None
+
+    table = sample_row.find_parent('table')
+    if not table:
+        return None
+
+    # 헤더에서 기간 레이블 추출: [(year, month), ...]
+    periods = _parse_section_headers(table)
+    if not periods:
+        return None
+
+    data = {}
+    for row in table.find_all('tr', id=re.compile(rf'^p_{grid_id}_\d+$')):
+        indicator_raw = _extract_row_header(row)
+        if not indicator_raw:
+            continue
+
+        unified_name = _map_indicator_name(indicator_raw)
+        if not unified_name:
+            continue
+
+        values = _extract_row_values(row)
+
+        for i, (year, month) in enumerate(periods):
+            if i >= len(values) or values[i] is None:
+                continue
+
+            if period_format == 'year':
+                period_key = str(year)
+            else:
+                period_key = f'{year}/{month:02d}'
+
+            col_name = f'{period_key}_{unified_name}'
+            data[col_name] = values[i]
+
+    return data
+
+
+def _parse_section_headers(table):
+    """
+    thead에서 기간 레이블 리스트 추출 → [(year, month), ...]
+
+    FnGuide FinanceRatio 페이지의 헤더 형식: YYYY/MM 또는 YYYY/MM(E)
+    """
+    headers = []
+    thead = table.find('thead')
+    if not thead:
+        return headers
+
+    # td_gapcolor2 클래스 행 우선, 없으면 마지막 thead 행
+    header_row = thead.find('tr', class_='td_gapcolor2')
+    if not header_row:
+        rows = thead.find_all('tr')
+        header_row = rows[-1] if rows else None
+
+    if not header_row:
+        return headers
+
+    for th in header_row.find_all(['th', 'td']):
+        tip_in = th.find('a', class_='tip_in')
+        text = (tip_in or th).get_text(strip=True)
+
+        match = re.match(r'(\d{4})/(\d{2})', text)
+        if match:
+            headers.append((int(match.group(1)), int(match.group(2))))
+
+    return headers
+
+
+def _extract_row_header(row):
+    """tr에서 지표명(th 텍스트) 추출 및 정규화"""
+    th = row.find('th')
+    if not th:
+        return ''
+
+    # tip_in 링크 내의 txt_acd span 우선
+    tip_in = th.find('a', class_='tip_in')
+    if tip_in:
+        txt_acd = tip_in.find('span', class_='txt_acd')
+        if txt_acd:
+            return txt_acd.get_text(strip=True)
+        return tip_in.get_text(strip=True)
+
+    # div 내 텍스트 (단위 표시 csize span 제거 후)
+    div = th.find('div')
+    if div:
+        for csize in div.find_all('span', class_='csize'):
+            csize.decompose()
+        return div.get_text(strip=True)
+
+    return th.get_text(strip=True)
+
+
+def _extract_row_values(row):
+    """tr에서 td 값들을 float 또는 None 리스트로 추출"""
+    values = []
+    for td in row.find_all('td'):
+        text = td.get_text(strip=True)
+        if text in ('\xa0', '', '-', 'N/A'):
+            values.append(None)
+        else:
+            try:
+                values.append(float(text.replace(',', '')))
+            except (ValueError, AttributeError):
+                values.append(None)
+    return values
+
+
+def _map_indicator_name(raw_name):
+    """
+    원본 지표명 → 통합 컬럼명 변환
+
+    매핑 순서:
+      1. 직접 매핑
+      2. 괄호 제거 후 재시도 (예: '총자산이익률(ROA)' → '총자산이익률')
+      3. 공백 제거 후 재시도
+
+    Returns:
+        str: 통합 컬럼명, 없으면 None
+    """
+    if raw_name in INDICATOR_NAME_MAP:
+        return INDICATOR_NAME_MAP[raw_name]
+
+    without_paren = re.sub(r'\([^)]+\)', '', raw_name).strip()
+    if without_paren in INDICATOR_NAME_MAP:
+        return INDICATOR_NAME_MAP[without_paren]
+
+    compact = without_paren.replace(' ', '')
+    if compact in INDICATOR_NAME_MAP:
+        return INDICATOR_NAME_MAP[compact]
+
+    return None
