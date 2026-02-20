@@ -183,18 +183,20 @@ def parseFnguideFiRatio(html):
     data = {}
     data['종목명'] = _parse_company_name(soup)
 
-    kse_sector, fics_sector = _parse_kse_fics(soup)
+    kse_sector, fics_sector, fiscal_month = _parse_kse_fics(soup)
     data['마켓분야'] = kse_sector
     data['FICS분야'] = fics_sector
+    if fiscal_month is not None:
+        data['결산월'] = fiscal_month
 
-    # 연결 누적 (Annual) — 컬럼 형식: {YYYY}_{지표명}
-    annual_data = _parse_grid_section(soup, 'grid1', period_format='year')
+    # 연결 누적 (Annual) — 컬럼 형식: {YYYY}_{지표명}, 연도별 최신 기간, 최근 4개년
+    annual_data = _parse_grid_section(soup, 'grid1', period_format='year', max_periods=4)
     if annual_data is None:
         return None
     data.update(annual_data)
 
-    # 연결 3개월 (Quarterly) — 컬럼 형식: {YYYY/MM}_{지표명}
-    quarterly_data = _parse_grid_section(soup, 'grid2', period_format='yearmonth')
+    # 연결 3개월 (Quarterly) — 컬럼 형식: {YYYY/MM}_{지표명}, 최근 3기간
+    quarterly_data = _parse_grid_section(soup, 'grid2', period_format='yearmonth', max_periods=3)
     if quarterly_data is not None:
         data.update(quarterly_data)
 
@@ -215,13 +217,34 @@ def _parse_company_name(soup):
 
 
 def _parse_kse_fics(soup):
-    """stxt_group에서 KSE, FICS 분야 추출 → (kse_sector, fics_sector)"""
+    """KSE/FICS 분야 및 결산월 추출 → (kse_sector, fics_sector, fiscal_month)
+
+    - KSE/FICS : p.stxt_group 내 span.stxt
+    - 결산월    : div.corp_group1 > h2 에서 "12월 결산" 형식
+    """
     kse_sector = ''
     fics_sector = ''
+    fiscal_month = None
+
+    # 결산월: div.corp_group1 내 h2 태그를 순회하여 "12월 결산" 패턴 추출
+    corp_group1 = soup.find('div', class_='corp_group1')
+    if corp_group1:
+        for h2 in corp_group1.find_all('h2'):
+            h2_text = h2.get_text(strip=True)
+            print(f"  [결산월 디버그] h2 텍스트: {repr(h2_text)}")
+            m = re.search(r'(\d+)월\s*결산', h2_text)
+            if m:
+                fiscal_month = int(m.group(1))
+                print(f"  [결산월 디버그] 추출 성공: {fiscal_month}월")
+                break
+        else:
+            print(f"  [결산월 디버그] 모든 h2 순회 완료 - 결산월 패턴 없음")
+    else:
+        print(f"  [결산월 디버그] div.corp_group1 요소를 찾을 수 없음")
 
     stxt_group = soup.find('p', class_='stxt_group')
     if not stxt_group:
-        return kse_sector, fics_sector
+        return kse_sector, fics_sector, fiscal_month
 
     for span in stxt_group.find_all('span', class_='stxt'):
         text = span.get_text(strip=True).replace('\xa0', ' ')
@@ -234,23 +257,23 @@ def _parse_kse_fics(soup):
                     kse_sector = re.sub(rf'^{prefix}\s+', '', text).strip()
                     break
 
-    return kse_sector, fics_sector
+    return kse_sector, fics_sector, fiscal_month
 
 
-def _parse_grid_section(soup, grid_id, period_format='year'):
+def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None):
     """
     grid1(연결 누적) 또는 grid2(연결 3개월) 섹션에서 재무비율 추출
 
     Args:
-        soup        : BeautifulSoup 객체
-        grid_id     : 'grid1' (연간) 또는 'grid2' (분기)
-        period_format: 'year' → {YYYY}, 'yearmonth' → {YYYY/MM}
+        soup         : BeautifulSoup 객체
+        grid_id      : 'grid1' (연간) 또는 'grid2' (분기)
+        period_format: 'year' → {YYYY} (연도별 최신 기간 사용), 'yearmonth' → {YYYY/MM}
+        max_periods  : 수집할 최대 기간 수 (None이면 전체)
 
     Returns:
         dict: {'{period}_{unified_indicator}': float, ...}
         None: 해당 grid 테이블 없음
     """
-    # p_grid1_* 또는 p_grid2_* ID를 가진 첫 번째 tr로 부모 table 찾기
     sample_row = soup.find('tr', id=re.compile(rf'^p_{grid_id}_\d+$'))
     if not sample_row:
         return None
@@ -259,10 +282,29 @@ def _parse_grid_section(soup, grid_id, period_format='year'):
     if not table:
         return None
 
-    # 헤더에서 기간 레이블 추출: [(year, month), ...]
     periods = _parse_section_headers(table)
     if not periods:
         return None
+
+    # (period_key, original_col_index) 목록 생성
+    if period_format == 'year':
+        # 연도별 가장 최근 월의 인덱스 선택 후 최근 max_periods년
+        year_to_latest = {}
+        for i, (year, month) in enumerate(periods):
+            if year not in year_to_latest or month > year_to_latest[year][0]:
+                year_to_latest[year] = (month, i)
+        sorted_years = sorted(year_to_latest.items())
+        if max_periods:
+            sorted_years = sorted_years[-max_periods:]
+        key_idx_list = [(str(year), info[1]) for year, info in sorted_years]
+    else:
+        # 분기: 최근 max_periods 기간
+        selected = periods[-max_periods:] if max_periods else periods
+        offset = len(periods) - len(selected)
+        key_idx_list = [
+            (f'{year}/{month:02d}', offset + i)
+            for i, (year, month) in enumerate(selected)
+        ]
 
     data = {}
     for row in table.find_all('tr', id=re.compile(rf'^p_{grid_id}_\d+$')):
@@ -276,17 +318,9 @@ def _parse_grid_section(soup, grid_id, period_format='year'):
 
         values = _extract_row_values(row)
 
-        for i, (year, month) in enumerate(periods):
-            if i >= len(values) or values[i] is None:
-                continue
-
-            if period_format == 'year':
-                period_key = str(year)
-            else:
-                period_key = f'{year}/{month:02d}'
-
-            col_name = f'{period_key}_{unified_name}'
-            data[col_name] = values[i]
+        for period_key, idx in key_idx_list:
+            if idx < len(values) and values[idx] is not None:
+                data[f'{period_key}_{unified_name}'] = values[idx]
 
     return data
 

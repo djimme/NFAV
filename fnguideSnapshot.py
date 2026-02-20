@@ -31,9 +31,11 @@ def parseFnguideSnapshot(html):
     data = {}
     data['종목명'] = _parse_company_name(soup)
 
-    kse_sector, fics_sector = _parse_kse_fics(soup)
+    kse_sector, fics_sector, fiscal_month = _parse_kse_fics(soup)
     data['마켓분야'] = kse_sector
     data['FICS분야'] = fics_sector
+    if fiscal_month is not None:
+        data['결산월'] = fiscal_month
 
     highlight = _parse_financial_highlight(soup)
     if highlight is None:
@@ -59,13 +61,34 @@ def _parse_company_name(soup):
 
 
 def _parse_kse_fics(soup):
-    """stxt_group에서 KSE, FICS 분야 추출 → (kse_sector, fics_sector)"""
+    """KSE/FICS 분야 및 결산월 추출 → (kse_sector, fics_sector, fiscal_month)
+
+    - KSE/FICS : p.stxt_group 내 span.stxt
+    - 결산월    : div.corp_group1 > h2 에서 "12월 결산" 형식
+    """
     kse_sector = ""
     fics_sector = ""
+    fiscal_month = None
+
+    # 결산월: div.corp_group1 내 h2 태그를 순회하여 "12월 결산" 패턴 추출
+    corp_group1 = soup.find('div', class_='corp_group1')
+    if corp_group1:
+        for h2 in corp_group1.find_all('h2'):
+            h2_text = h2.get_text(strip=True)
+            print(f"  [결산월 디버그] h2 텍스트: {repr(h2_text)}")
+            m = re.search(r'(\d+)월\s*결산', h2_text)
+            if m:
+                fiscal_month = int(m.group(1))
+                print(f"  [결산월 디버그] 추출 성공: {fiscal_month}월")
+                break
+        else:
+            print(f"  [결산월 디버그] 모든 h2 순회 완료 - 결산월 패턴 없음")
+    else:
+        print(f"  [결산월 디버그] div.corp_group1 요소를 찾을 수 없음")
 
     stxt_group = soup.find('p', class_='stxt_group')
     if not stxt_group:
-        return kse_sector, fics_sector
+        return kse_sector, fics_sector, fiscal_month
 
     for span in stxt_group.find_all('span', class_='stxt'):
         text = span.get_text(strip=True).replace('\xa0', ' ')
@@ -79,7 +102,7 @@ def _parse_kse_fics(soup):
                     kse_sector = re.sub(rf'^{prefix}\s+', '', text).strip()
                     break
 
-    return kse_sector, fics_sector
+    return kse_sector, fics_sector, fiscal_month
 
 
 def _parse_financial_highlight(soup, current_year=None):

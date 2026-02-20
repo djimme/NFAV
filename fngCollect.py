@@ -22,8 +22,8 @@ from fin_utils import save_styled_excel, save_styled_excel_multisheet
 
 MODULE_CONFIG = {
     'snapshot': {
-        'extra_base_fields': ['마켓분야', 'FICS분야'],
-        'skip_keys': {'종목명', '마켓분야', 'FICS분야'},
+        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
         'indicator_order': [
             '영업이익률(%)', '부채비율(%)', '유보율(%)', '지배주주순이익률(%)',
             'PER(배)', 'EPS(원)', 'PBR(배)', 'BPS(원)',
@@ -40,8 +40,8 @@ MODULE_CONFIG = {
         'output_prefix': 'finance',
     },
     'ratio': {
-        'extra_base_fields': ['마켓분야', 'FICS분야'],
-        'skip_keys': {'종목명', '마켓분야', 'FICS분야'},
+        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
         'indicator_order': [
             # 안정성
             '유동비율', '부채비율', '유보율', '순차입금비율', '이자보상배율', '자기자본비율',
@@ -61,9 +61,30 @@ MODULE_CONFIG = {
         'output_prefix': 'finance_ratio',
     },
     'investidx': {
-        'extra_base_fields': [],
-        'skip_keys': {'code'},
-        'indicator_order': ['PER'],
+        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
+        'indicator_order': [
+            # 멀티팩터 스타일 분석 — 팩터별 (종목, 업종) 쌍 순서
+            '팩터_업종명',
+            '베타_종목', '베타_업종',
+            '배당성_종목', '배당성_업종',
+            '수익건전성_종목', '수익건전성_업종',
+            '성장성_종목', '성장성_업종',
+            '기업투자_종목', '기업투자_업종',
+            '거시경제 민감도_종목', '거시경제 민감도_업종',
+            '모멘텀_종목', '모멘텀_업종',
+            '단기 Reversal_종목', '단기 Reversal_업종',
+            '기업규모_종목', '기업규모_업종',
+            '거래도_종목', '거래도_업종',
+            '밸류_종목', '밸류_업종',
+            '변동성_종목', '변동성_업종',
+            # 기업가치 Per Share
+            'EPS', 'EBITDAPS', 'CFPS', 'SPS', 'BPS', 'DPS', '배당성향',
+            # 기업가치 Multiples
+            'PER', 'PCR', 'PSR', 'PBR', 'EV',
+            # 기업가치 FCF
+            '총현금흐름', '총투자', 'FCFF',
+        ],
         'description': 'FnGuide Investment Index (SVD_Invest)',
         'output_prefix': 'invest_idx',
     },
@@ -89,8 +110,10 @@ def _get_module_fns(module_name):
         from fnguideFinanceRatio import getFnGuideFiRatio, parseFnguideFiRatio
         return getFnGuideFiRatio, parseFnguideFiRatio
     elif module_name == 'investidx':
-        from fnguideInvestIdx import getFnGuideInvestIdx, parseFnGuideInvestIdx
-        return getFnGuideInvestIdx, parseFnGuideInvestIdx
+        from fnguideInvestIdx import collectInvestIdx
+        # collectInvestIdx(code)가 HTML+JSON을 모두 처리하므로
+        # get_fn은 code를 그대로 전달하고 parse_fn에서 통합 수집한다.
+        return lambda code: code, collectInvestIdx
     else:
         raise ValueError(f"Unknown module: {module_name}")
 
@@ -194,7 +217,7 @@ def _order_columns(df, indicator_order):
     indicator_order에 지정된 지표 순서대로 컬럼을 배치한다.
     각 지표 내에서는 컬럼명 알파벳순(연도순/기간순)으로 정렬된다.
     """
-    base_cols = ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야']
+    base_cols = ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월']
     ordered = [c for c in base_cols if c in df.columns]
 
     remaining = [c for c in df.columns if c not in ordered]
@@ -261,7 +284,7 @@ def collect_all_stocks(module_name='snapshot', use_multiprocessing=True):
 
 def _filter_industry_columns(df, indicators):
     """업종 지표 목록에 매칭되는 컬럼만 추출 (기본 컬럼 포함, 정렬 유지)"""
-    base_cols = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야'] if c in df.columns]
+    base_cols = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월'] if c in df.columns]
     remaining = [c for c in df.columns if c not in base_cols]
 
     ordered = []
@@ -313,7 +336,7 @@ def _build_ratio_sheets(df):
             continue
         cols = _filter_industry_columns(idf, INDUSTRY_INDICATORS.get(itype, []))
         # 값이 하나라도 있는 컬럼만 유지 (기본 컬럼은 항상 포함)
-        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야'] if c in cols]
+        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월'] if c in cols]
         indicator_cols = [c for c in cols if c not in base and idf[c].notna().any()]
         sheets.append((itype, idf[base + indicator_cols]))
 
