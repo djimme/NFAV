@@ -141,6 +141,7 @@ NVIDIA Corporation/
 comp_list.html
 corpCode/
 derived/
+temp_comp/*.txt
 *.pdf
 *.csv
 *.xlsx
