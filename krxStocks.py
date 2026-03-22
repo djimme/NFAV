@@ -12,36 +12,32 @@ def getKrxStocks():
     base_url: str = "https://kind.krx.co.kr/corpgeneral/corpList.do"
     save_path: str = "./corpCode/comp_list.html"
 
-    if not os.path.exists(save_path):            
-        """
-        KIND 상장종목현황 화면의 EXCEL 버튼과 동일한 요청을 날려 엑셀 파일을 저장한다.
-        필요한 경우 params 값을 F12 개발자 도구 내 Network 탭에서 확인 후 수정한다.
-        """
+    if os.path.exists(save_path):
+        os.remove(save_path)
 
-        # 아래 params는 예시이며, 실제로는 개발자 도구에서
-        # EXCEL 버튼 클릭 시 corpList.do?method=download 로 나가는
-        # 쿼리스트링을 그대로 옮겨 적어야 한다.
-        params = {
-            # 아래부터는 개발자도구에서 보고 그대로 세팅
-            "method": "download",   # fnDownload 안에서 지정되는 다운로드용 method 값
-            "searchType" : "13",  # 전체검색
-        }
+    # KIND 상장종목현황 화면의 EXCEL 버튼과 동일한 요청을 날려 엑셀 파일을 저장한다.
+    # 필요한 경우 params 값을 F12 개발자 도구 내 Network 탭에서 확인 후 수정한다.
+    params = {
+        # 아래부터는 개발자도구에서 보고 그대로 세팅
+        "method": "download",   # fnDownload 안에서 지정되는 다운로드용 method 값
+        "searchType" : "13",  # 전체검색
+    }
 
-        headers = {
-            # 최소한의 헤더 (필요 시 개발자 도구에서 복사해서 추가)
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
-            ),
-            "Referer": "https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage",
-        }
+    headers = {
+        # 최소한의 헤더 (필요 시 개발자 도구에서 복사해서 추가)
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
+        ),
+        "Referer": "https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage",
+    }
 
-        resp = requests.get(base_url, params=params, headers=headers)
-        resp.raise_for_status()
+    resp = requests.get(base_url, params=params, headers=headers)
+    resp.raise_for_status()
 
-        Path(save_path).write_bytes(resp.content)    
-        print(f"saved: {save_path}")
+    Path(save_path).write_bytes(resp.content)
+    print(f"saved: {save_path}")
 
     code_df = pd.read_html(save_path, header=0)[0]      
         
