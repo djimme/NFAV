@@ -217,16 +217,16 @@ def _parse_kse_fics(soup):
     if corp_group1:
         for h2 in corp_group1.find_all('h2'):
             h2_text = h2.get_text(strip=True)
-            print(f"  [결산월 디버그] h2 텍스트: {repr(h2_text)}")
+            # print(f"  [결산월 디버그] h2 텍스트: {repr(h2_text)}")
             m = re.search(r'(\d+)월\s*결산', h2_text)
             if m:
                 fiscal_month = int(m.group(1))
-                print(f"  [결산월 디버그] 추출 성공: {fiscal_month}월")
+                # print(f"  [결산월 디버그] 추출 성공: {fiscal_month}월")
                 break
         else:
-            print(f"  [결산월 디버그] 모든 h2 순회 완료 - 결산월 패턴 없음")
+            pass  # print(f"  [결산월 디버그] 모든 h2 순회 완료 - 결산월 패턴 없음")
     else:
-        print(f"  [결산월 디버그] div.corp_group1 요소를 찾을 수 없음")
+        pass  # print(f"  [결산월 디버그] div.corp_group1 요소를 찾을 수 없음")
 
     stxt_group = soup.find('p', class_='stxt_group')
     if not stxt_group:
