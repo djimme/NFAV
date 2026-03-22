@@ -29,6 +29,8 @@ def save_styled_excel(df, filepath, sheet_name="Sheet1", index=False):
         for cell in row:
             cell.font = font
             cell.alignment = alignment
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = '#,##0.##'
 
     wb.save(filepath)
 
@@ -64,6 +66,8 @@ def save_styled_excel_multisheet(sheets, filepath):
             for cell in row_cells:
                 cell.font = font
                 cell.alignment = alignment
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0.##'
 
     wb.save(filepath)
 
