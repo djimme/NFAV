@@ -2,7 +2,7 @@
 FnGuide FinanceRatio 페이지 (SVD_FinanceRatio.asp) 데이터 수집 및 파싱
 
 업종별 재무비율 수집:
-- 연결 누적 (Annual)  : 연도별 재무비율 → 컬럼 형식 {YYYY}_{지표명}
+- 연결 누적 (Annual)  : 연도별 재무비율 → 컬럼 형식 {YYYY(누적)}_{지표명}
 - 연결 3개월 (Quarterly): 분기별 재무비율 → 컬럼 형식 {YYYY/MM}_{지표명}
 
 업종별 지표 (통합 컬럼명으로 매핑):
@@ -189,7 +189,7 @@ def parseFnguideFiRatio(html):
     if fiscal_month is not None:
         data['결산월'] = fiscal_month
 
-    # 연결 누적 (Annual) — 컬럼 형식: {YYYY}_{지표명}, 연도별 최신 기간, 최근 4개년
+    # 연결 누적 (Annual) — 컬럼 형식: {YYYY(누적)}_{지표명}, 연도별 최신 기간, 최근 4개년
     annual_data = _parse_grid_section(soup, 'grid1', period_format='year', max_periods=4)
     if annual_data is None:
         return None
@@ -231,16 +231,16 @@ def _parse_kse_fics(soup):
     if corp_group1:
         for h2 in corp_group1.find_all('h2'):
             h2_text = h2.get_text(strip=True)
-            print(f"  [결산월 디버그] h2 텍스트: {repr(h2_text)}")
+            # print(f"  [결산월 디버그] h2 텍스트: {repr(h2_text)}")
             m = re.search(r'(\d+)월\s*결산', h2_text)
             if m:
                 fiscal_month = int(m.group(1))
-                print(f"  [결산월 디버그] 추출 성공: {fiscal_month}월")
+                # print(f"  [결산월 디버그] 추출 성공: {fiscal_month}월")
                 break
         else:
-            print(f"  [결산월 디버그] 모든 h2 순회 완료 - 결산월 패턴 없음")
+            pass  # print(f"  [결산월 디버그] 모든 h2 순회 완료 - 결산월 패턴 없음")
     else:
-        print(f"  [결산월 디버그] div.corp_group1 요소를 찾을 수 없음")
+        pass  # print(f"  [결산월 디버그] div.corp_group1 요소를 찾을 수 없음")
 
     stxt_group = soup.find('p', class_='stxt_group')
     if not stxt_group:
@@ -267,7 +267,7 @@ def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None):
     Args:
         soup         : BeautifulSoup 객체
         grid_id      : 'grid1' (연간) 또는 'grid2' (분기)
-        period_format: 'year' → {YYYY} (연도별 최신 기간 사용), 'yearmonth' → {YYYY/MM}
+        period_format: 'year' → {YYYY(누적)} (연도별 최신 기간 사용), 'yearmonth' → {YYYY/MM}
         max_periods  : 수집할 최대 기간 수 (None이면 전체)
 
     Returns:
@@ -296,13 +296,13 @@ def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None):
         sorted_years = sorted(year_to_latest.items())
         if max_periods:
             sorted_years = sorted_years[-max_periods:]
-        key_idx_list = [(str(year), info[1]) for year, info in sorted_years]
+        key_idx_list = [(f'{year}(누적)', info[1]) for year, info in sorted_years]
     else:
         # 분기: 최근 max_periods 기간
         selected = periods[-max_periods:] if max_periods else periods
         offset = len(periods) - len(selected)
         key_idx_list = [
-            (f'{year}/{month:02d}', offset + i)
+            (f'{year}/{_month_to_quarter(month)}', offset + i)
             for i, (year, month) in enumerate(selected)
         ]
 
@@ -323,6 +323,11 @@ def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None):
                 data[f'{period_key}_{unified_name}'] = values[idx]
 
     return data
+
+
+def _month_to_quarter(month):
+    """월 → 분기 문자열 변환 (예: 12 → '4Q')"""
+    return f'{(month - 1) // 3 + 1}Q'
 
 
 def _parse_section_headers(table):
