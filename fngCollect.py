@@ -33,9 +33,20 @@ MODULE_CONFIG = {
         'output_prefix': 'snapshot',
     },
     'finance': {
-        'extra_base_fields': [],
-        'skip_keys': {'code', '종목명', '업종'},
-        'indicator_order': ['PER', 'PBR', '당기순이익', '유동자산', '부채'],
+        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
+        'indicator_order': [
+            # 손익계산서 — 비금융
+            '매출액', '매출원가', '매출총이익',
+            # 손익계산서 — 은행/금융지주
+            '순영업수익',
+            # 손익계산서 — 보험/창투사
+            '영업수익', '영업비용',
+            # 손익계산서 — 공통
+            '판관비', '영업이익', '세전계속사업이익', '법인세비용', '당기순이익',
+            # 현금흐름표 — 공통
+            '영업활동현금흐름', '투자활동현금흐름', '재무활동현금흐름', '현금성자산증가',
+        ],
         'description': 'FnGuide Finance (SVD_Finance)',
         'output_prefix': 'finance',
     },
@@ -343,8 +354,72 @@ def _build_ratio_sheets(df):
     return sheets
 
 
+def _build_finance_sheets(df):
+    """
+    Finance DataFrame을 업종별 시트 리스트로 분리
+
+    업종별 손익계산서 계정 구조:
+      비금융 : 매출액, 매출원가, 매출총이익, 판관비 + 공통
+      은행/증권: 순영업수익, 판관비 + 공통   (두 업종 동일 template)
+      보험/창투: 영업수익, 영업비용 + 공통   (두 업종 동일 template)
+
+    Returns:
+        [(sheet_name, DataFrame), ...] — 데이터가 있는 업종만 포함
+    """
+    from fnguideFinanceRatio import (
+        detect_industry_type,
+        INDUSTRY_TYPE_MANUFACTURING, INDUSTRY_TYPE_BANKING,
+        INDUSTRY_TYPE_SECURITIES, INDUSTRY_TYPE_INSURANCE,
+        INDUSTRY_TYPE_VENTURE,
+    )
+
+    _COMMON = [
+        '영업이익', '세전계속사업이익', '법인세비용', '당기순이익',
+        '영업활동현금흐름', '투자활동현금흐름', '재무활동현금흐름', '현금성자산증가',
+    ]
+
+    finance_indicators = {
+        INDUSTRY_TYPE_MANUFACTURING: ['매출액', '매출원가', '매출총이익', '판관비'] + _COMMON,
+        INDUSTRY_TYPE_BANKING:       ['순영업수익', '판관비'] + _COMMON,
+        INDUSTRY_TYPE_SECURITIES:    ['순영업수익', '판관비'] + _COMMON,
+        INDUSTRY_TYPE_INSURANCE:     ['영업수익', '영업비용'] + _COMMON,
+        INDUSTRY_TYPE_VENTURE:       ['영업수익', '영업비용'] + _COMMON,
+    }
+
+    industry_order = [
+        INDUSTRY_TYPE_MANUFACTURING,
+        INDUSTRY_TYPE_BANKING,
+        INDUSTRY_TYPE_SECURITIES,
+        INDUSTRY_TYPE_INSURANCE,
+        INDUSTRY_TYPE_VENTURE,
+    ]
+
+    market_col = '마켓분야' if '마켓분야' in df.columns else None
+    fics_col   = 'FICS분야' if 'FICS분야' in df.columns else None
+
+    def get_type(row):
+        market = row[market_col] if market_col else ''
+        fics   = row[fics_col]   if fics_col   else ''
+        return detect_industry_type(market, fics)
+
+    df = df.copy()
+    df['_itype'] = df.apply(get_type, axis=1)
+
+    sheets = []
+    for itype in industry_order:
+        idf = df[df['_itype'] == itype].drop(columns=['_itype']).reset_index(drop=True)
+        if idf.empty:
+            continue
+        cols = _filter_industry_columns(idf, finance_indicators.get(itype, []))
+        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월'] if c in cols]
+        indicator_cols = [c for c in cols if c not in base and idf[c].notna().any()]
+        sheets.append((itype, idf[base + indicator_cols]))
+
+    return sheets
+
+
 def save_to_excel(df, module_name='snapshot', filename=None):
-    """DataFrame을 Excel 파일로 저장 (ratio 모듈은 업종별 멀티시트)"""
+    """DataFrame을 Excel 파일로 저장 (ratio/finance 모듈은 업종별 멀티시트)"""
     if filename is None:
         config = MODULE_CONFIG[module_name]
         now = datetime.now()
@@ -352,6 +427,12 @@ def save_to_excel(df, module_name='snapshot', filename=None):
 
     if module_name == 'ratio':
         sheets = _build_ratio_sheets(df)
+        if sheets:
+            save_styled_excel_multisheet(sheets, filename)
+        else:
+            save_styled_excel(df, filename)
+    elif module_name == 'finance':
+        sheets = _build_finance_sheets(df)
         if sheets:
             save_styled_excel_multisheet(sheets, filename)
         else:
@@ -389,36 +470,66 @@ if __name__ == "__main__":
 
     print(f"모듈: {MODULE_CONFIG[module_name]['description']}")
 
-    if rest and rest[0] == "test":
-        test_codes = rest[1:] if len(rest) > 1 else ['005930']
-        print(f"테스트 모드: {len(test_codes)}개 종목")
+    # all 모드: 각 모듈을 독립적으로 수집하여 개별 파일로 저장
+    if module_name == 'all':
+        target_modules = _ALL_MODULES
+        test_codes = rest[1:] if (rest and rest[0] == "test" and len(rest) > 1) else (['005930'] if (rest and rest[0] == "test") else None)
+        is_test = rest and rest[0] == "test"
 
-        results = []
-        for code in test_codes:
-            row = process_single_stock(
-                ({'scode': code, 'sname': '', 'industry': '', 'products': ''}, module_name)
-            )
-            if row is not None:
-                results.append(row)
+        for mod in target_modules:
+            print(f"\n{'='*50}")
+            print(f"모듈: {MODULE_CONFIG[mod]['description']}")
+            print(f"{'='*50}")
 
-        if results:
-            final_df = _order_columns(
-                pd.DataFrame(results), _get_indicator_order(module_name)
-            )
+            if is_test:
+                print(f"테스트 모드: {test_codes}개 종목")
+                results = []
+                for code in test_codes:
+                    row = process_single_stock(
+                        ({'scode': code, 'sname': '', 'industry': '', 'products': ''}, mod)
+                    )
+                    if row is not None:
+                        results.append(row)
+                mod_df = _order_columns(pd.DataFrame(results), _get_indicator_order(mod)) if results else None
+            else:
+                mod_df = collect_all_stocks(module_name=mod, use_multiprocessing=True)
+
+            if mod_df is not None:
+                print(f"\n=== 추출된 데이터 ===")
+                print(f"전체 종목 수: {len(mod_df)}")
+                print(f"전체 컬럼 수: {len(mod_df.columns)}")
+                print(f"\n=== Excel 저장 ===")
+                filename = save_to_excel(mod_df, module_name=mod)
+                print(f"OK 완료: {filename}")
+            else:
+                print(f"ERROR [{mod}] 데이터 추출에 실패했습니다.")
+
+    else:
+        if rest and rest[0] == "test":
+            test_codes = rest[1:] if len(rest) > 1 else ['005930']
+            print(f"테스트 모드: {len(test_codes)}개 종목")
+
+            results = []
+            for code in test_codes:
+                row = process_single_stock(
+                    ({'scode': code, 'sname': '', 'industry': '', 'products': ''}, module_name)
+                )
+                if row is not None:
+                    results.append(row)
+
+            final_df = _order_columns(pd.DataFrame(results), _get_indicator_order(module_name)) if results else None
         else:
-            final_df = None
-    else:
-        final_df = collect_all_stocks(module_name=module_name, use_multiprocessing=True)
+            final_df = collect_all_stocks(module_name=module_name, use_multiprocessing=True)
 
-    if final_df is not None:
-        print(f"\n=== 추출된 데이터 ===")
-        print(f"전체 종목 수: {len(final_df)}")
-        print(f"전체 컬럼 수: {len(final_df.columns)}")
+        if final_df is not None:
+            print(f"\n=== 추출된 데이터 ===")
+            print(f"전체 종목 수: {len(final_df)}")
+            print(f"전체 컬럼 수: {len(final_df.columns)}")
 
-        print(f"\n=== Excel 저장 ===")
-        filename = save_to_excel(final_df, module_name=module_name)
+            print(f"\n=== Excel 저장 ===")
+            filename = save_to_excel(final_df, module_name=module_name)
 
-        print(f"\nOK 성공적으로 완료되었습니다!")
-        print(f"  파일: {filename}")
-    else:
-        print("\nERROR 데이터 추출에 실패했습니다.")
+            print(f"\nOK 성공적으로 완료되었습니다!")
+            print(f"  파일: {filename}")
+        else:
+            print("\nERROR 데이터 추출에 실패했습니다.")
