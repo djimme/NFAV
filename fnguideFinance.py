@@ -10,12 +10,16 @@ FnGuide Finance 페이지 (SVD_Finance.asp) 데이터 수집 및 파싱
   영업활동현금흐름, 투자활동현금흐름, 재무활동현금흐름, 현금성자산증가
 
 컬럼 형식:
-  연간 : {YYYY}_{지표명}    (예: 2024_당기순이익)
-  분기 : {YYYY/MM}_{지표명} (예: 2024/12_당기순이익)
+  연간 : {YYYY}(연간)_{지표명}    (예: 2024(연간)_당기순이익)
+  분기 : {YYYY/NQ}_{지표명}       (예: 2024/4Q_당기순이익)
+
+컬럼 순서:
+  지표명별로 연간 데이터 컬럼이 먼저 나온 후, 분기 데이터 컬럼이 이어짐
 
 Public API:
   getFnguideFinance(code)    : HTML 가져오기 (캐싱)
   parseFnguideFinance(html)  : 재무제표 데이터 추출 → dict 또는 None
+  collectFinance(code)       : HTML 가져오기 + 파싱 통합 수집 → dict 또는 None
 """
 import re
 
@@ -86,15 +90,31 @@ def parseFnguideFinance(html):
     first_th = sonik_y_el.select_one('thead th')
     data['연결여부'] = first_th.get_text(strip=True) if first_th else ''
 
-    # 손익계산서 연간 / 분기
-    _process_table(soup, '#divSonikY', _SONIK_TARGETS, annual=True,  result=data)
-    _process_table(soup, '#divSonikQ', _SONIK_TARGETS, annual=False, result=data)
+    # 손익계산서: 지표명별 연간 → 분기 순서로 추가
+    sonik_y = _process_table(soup, '#divSonikY', _SONIK_TARGETS, annual=True)
+    sonik_q = _process_table(soup, '#divSonikQ', _SONIK_TARGETS, annual=False)
+    _merge_by_metric(data, sonik_y, sonik_q, _SONIK_TARGETS)
 
-    # 현금흐름표 연간 / 분기
-    _process_table(soup, '#divCashY',  _CASH_TARGETS,  annual=True,  result=data)
-    _process_table(soup, '#divCashQ',  _CASH_TARGETS,  annual=False, result=data)
+    # 현금흐름표: 지표명별 연간 → 분기 순서로 추가
+    cash_y = _process_table(soup, '#divCashY', _CASH_TARGETS, annual=True)
+    cash_q = _process_table(soup, '#divCashQ', _CASH_TARGETS, annual=False)
+    _merge_by_metric(data, cash_y, cash_q, _CASH_TARGETS)
 
     return data
+
+
+def collectFinance(code):
+    """
+    Finance HTML 가져오기 + 파싱 통합 수집
+
+    Args:
+        code: 종목코드 (6자리 문자열, 예: '005930')
+
+    Returns:
+        dict: 종목명, 마켓분야, FICS분야, 결산월, 연결여부, 연도별/분기별 손익/현금흐름 데이터
+        None: 손익계산서 연간 테이블(#divSonikY)이 없는 경우
+    """
+    return parseFnguideFinance(getFnguideFinance(code))
 
 
 # --- Private parse helpers ---
@@ -191,11 +211,12 @@ def _parse_number(text):
         return None
 
 
-def _process_table(soup, section_id, targets, annual, result):
-    """테이블에서 targets에 해당하는 행 데이터를 추출해 result에 추가"""
+def _process_table(soup, section_id, targets, annual):
+    """테이블에서 targets에 해당하는 행 데이터를 추출해 {col_name: {key: value}} dict로 반환"""
+    result = {}
     el = soup.select_one(section_id)
     if el is None:
-        return
+        return result
 
     headers = el.select('thead th')
     date_cols = _parse_date_columns(headers)
@@ -212,9 +233,25 @@ def _process_table(soup, section_id, targets, annual, result):
         if tr is None:
             continue
         cells = tr.select('th, td')
+        col_entries = {}
         for col_idx, period in date_cols:
             if col_idx >= len(cells):
                 continue
             raw = cells[col_idx].get_text(strip=True)
-            period_label = period.split('/')[0] if annual else _to_quarter_label(period)
-            result[f'{period_label}_{col_name}'] = _parse_number(raw)
+            if annual:
+                period_label = f"{period.split('/')[0]}(연간)"
+            else:
+                period_label = _to_quarter_label(period)
+            col_entries[f'{period_label}_{col_name}'] = _parse_number(raw)
+        if col_entries:
+            result[col_name] = col_entries
+    return result
+
+
+def _merge_by_metric(result, annual_dict, quarterly_dict, targets):
+    """지표명별로 연간 데이터 후 분기 데이터 순서로 result에 추가"""
+    for _, col_name in targets:
+        if col_name in annual_dict:
+            result.update(annual_dict[col_name])
+        if col_name in quarterly_dict:
+            result.update(quarterly_dict[col_name])

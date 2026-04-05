@@ -110,21 +110,19 @@ _ALL_MODULES = ['snapshot', 'finance', 'ratio', 'investidx']
 
 
 def _get_module_fns(module_name):
-    """모듈명에 해당하는 (get_fn, parse_fn) 반환 (worker 프로세스 내에서 import)"""
+    """모듈명에 해당하는 collect_fn(code) 반환 (worker 프로세스 내에서 import)"""
     if module_name == 'snapshot':
-        from fnguideSnapshot import getFnGuideSnapshot, parseFnguideSnapshot
-        return getFnGuideSnapshot, parseFnguideSnapshot
+        from fnguideSnapshot import collectSnapshot
+        return collectSnapshot
     elif module_name == 'finance':
-        from fnguideFinance import getFnguideFinance, parseFnguideFinance
-        return getFnguideFinance, parseFnguideFinance
+        from fnguideFinance import collectFinance
+        return collectFinance
     elif module_name == 'ratio':
-        from fnguideFinanceRatio import getFnGuideFiRatio, parseFnguideFiRatio
-        return getFnGuideFiRatio, parseFnguideFiRatio
+        from fnguideFinanceRatio import collectFinanceRatio
+        return collectFinanceRatio
     elif module_name == 'investidx':
         from fnguideInvestIdx import collectInvestIdx
-        # collectInvestIdx(code)가 HTML+JSON을 모두 처리하므로
-        # get_fn은 code를 그대로 전달하고 parse_fn에서 통합 수집한다.
-        return lambda code: code, collectInvestIdx
+        return collectInvestIdx
     else:
         raise ValueError(f"Unknown module: {module_name}")
 
@@ -172,9 +170,8 @@ def process_single_stock(args):
     for mod in modules_to_process:
         config = MODULE_CONFIG[mod]
         try:
-            get_fn, parse_fn = _get_module_fns(mod)
-            html = get_fn(code)
-            indicators = parse_fn(html)
+            collect_fn = _get_module_fns(mod)
+            indicators = collect_fn(code)
             if indicators is None:
                 continue
 

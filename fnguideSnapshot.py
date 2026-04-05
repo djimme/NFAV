@@ -1,8 +1,9 @@
 """
 FnGuide Snapshot 페이지 (SVD_Main.asp) 데이터 수집 및 파싱
 
-- getFnGuideSnapshot(code): HTML 가져오기 (캐싱)
+- getFnGuideSnapshot(code)  : HTML 가져오기 (캐싱)
 - parseFnguideSnapshot(html): 종목명, KSE/FICS 분야, Financial Highlight 투자지표 추출
+- collectSnapshot(code)     : HTML 가져오기 + 파싱 통합 수집 → dict 또는 None
 """
 import re
 from datetime import datetime
@@ -45,6 +46,20 @@ def parseFnguideSnapshot(html):
     data.update(highlight_data)
 
     return data
+
+
+def collectSnapshot(code):
+    """
+    Snapshot HTML 가져오기 + 파싱 통합 수집
+
+    Args:
+        code: 종목코드 (6자리 문자열, 예: '005930')
+
+    Returns:
+        dict: 종목명, 마켓분야, FICS분야, 연도별 재무지표, 발행주식수
+        None: Financial Highlight 테이블이 없는 경우
+    """
+    return parseFnguideSnapshot(getFnGuideSnapshot(code))
 
 
 # --- Private parse helpers ---
