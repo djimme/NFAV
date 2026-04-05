@@ -169,7 +169,7 @@ def _process_table(soup, section_id, targets, annual):
     date_cols = _parse_date_columns(headers)
 
     if annual:
-        date_cols = date_cols[:3]   # 최근 3개 완전 회계연도
+        date_cols = date_cols[-3:]  # 최근 3개 완전 회계연도
     else:
         date_cols = date_cols[-4:]  # 최근 4분기
 
@@ -196,9 +196,10 @@ def _process_table(soup, section_id, targets, annual):
 
 
 def _merge_by_metric(result, annual_dict, quarterly_dict, targets):
-    """지표명별로 연간 데이터 후 분기 데이터 순서로 result에 추가"""
+    """모든 지표의 연간 데이터를 먼저 추가한 후, 모든 지표의 분기 데이터를 추가"""
     for _, col_name in targets:
         if col_name in annual_dict:
             result.update(annual_dict[col_name])
+    for _, col_name in targets:
         if col_name in quarterly_dict:
             result.update(quarterly_dict[col_name])
