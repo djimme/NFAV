@@ -145,3 +145,7 @@ temp_comp/*.txt
 *.pdf
 *.csv
 *.xlsx
+
+# API keys (파일)
+.env
+.env.local

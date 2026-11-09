@@ -8,6 +8,10 @@ Excel 저장:
 HTTP / 캐싱:
   fetch_fnguide_page(code, asp_page, menu_id, cache_prefix): FnGuide 페이지 다운로드 (캐싱)
 
+환경변수 (.env):
+  load_env()            : 프로젝트 루트의 .env를 os.environ에 로드 (이미 설정된 값은 유지)
+  get_env(name, default): .env 로드 후 값 반환
+
 HTML 파싱 공통 헬퍼 (모든 FnGuide 모듈에서 공유):
   parse_company_name(soup): 페이지 title에서 종목명 추출
   parse_kse_fics(soup)    : KSE/FICS 분야 및 결산월 추출
@@ -173,3 +177,36 @@ def parse_kse_fics(soup) -> tuple:
                     break
 
     return kse_sector, fics_sector, fiscal_month
+
+
+# ── 환경변수 (.env) ─────────────────────────────────────────
+
+_ENV_LOADED = False
+
+
+def load_env(path=None):
+    """프로젝트 루트의 .env 파일을 읽어 os.environ에 넣는다 (python-dotenv 없이 동작).
+
+    - 이미 환경변수로 설정된 값은 덮어쓰지 않는다.
+    - '#'으로 시작하는 줄과 빈 줄은 무시한다.
+    """
+    global _ENV_LOADED
+    if _ENV_LOADED and path is None:
+        return
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"\''))
+    _ENV_LOADED = True
+
+
+def get_env(name, default=None):
+    """.env를 로드한 뒤 환경변수 값을 반환한다. 비어 있으면 default."""
+    load_env()
+    v = os.environ.get(name, '')
+    return v if v else default

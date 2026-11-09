@@ -1,6 +1,7 @@
 # strat_utils.py
 # 전략 모듈 공통 유틸리티
 # - FnGuide Excel 파일 로딩 (load_all_data, merge_base)
+# - 공식 API 원천 데이터 로딩: DART 재무상태표, 시가총액 (선택, 파일이 있으면 병합)
 # - 공통 종목 필터 (apply_common_filters)
 # - 동적 컬럼 탐색 헬퍼 (_recent_cols, _best_col)
 # - 정규화 헬퍼 (_normalize)
@@ -76,7 +77,35 @@ def load_all_data(config: dict) -> dict:
     else:
         raise FileNotFoundError(f"ratio 파일 없음: {rat_path}")
 
+    # --- 공식 API 원천 데이터 (선택) — apiCollect.py 실행 결과 ---
+    for key, cfg_key, label in [("dart_balance", "dart_balance_file", "DART 재무상태표"),
+                                ("market_cap", "market_cap_file", "시가총액")]:
+        path = _latest_file(config.get(cfg_key))
+        if path:
+            df = pd.read_excel(path, dtype={"종목코드": str})
+            df["종목코드"] = df["종목코드"].str.zfill(6)
+            data[key] = df
+            print(f"  ✅ {label}: {path} ({len(df)}개 종목)")
+        else:
+            print(f"  ℹ️  {label} 파일 없음 ({config.get(cfg_key)}) → python apiCollect.py 로 수집")
+
     return data
+
+
+def _latest_file(pattern):
+    """경로 또는 glob 패턴에서 가장 최근 파일을 반환한다 (테스트 산출물 *_test.xlsx 제외)."""
+    if not pattern:
+        return None
+    if "*" not in pattern:
+        return pattern if os.path.exists(pattern) else None
+    files = sorted(f for f in glob.glob(pattern) if not f.endswith("_test.xlsx"))
+    return files[-1] if files else None
+
+
+# DART 재무상태표에서 base에 합칠 컬럼 (DART_ 접두어로 FnGuide 컬럼과 구분)
+DART_BALANCE_COLS = ["기준기간", "연결구분", "유동구분", "유동자산", "부채총계", "자본총계", "비지배지분",
+                     "현금및현금성자산", "유동금융자산", "장기금융자산", "이자부부채", "리스부채", "당기순이익(누적)"]
+MARKET_CAP_COLS = ["시가총액_억원", "종가", "전일종가", "상장주식수", "기준일", "출처"]
 
 
 def merge_base(data: dict) -> pd.DataFrame:
@@ -113,6 +142,19 @@ def merge_base(data: dict) -> pd.DataFrame:
     inv_keep = [c for c in inv_keep if c in inv.columns]
     base = base.merge(inv[inv_keep], on="종목코드", how="left")
 
+    # DART 재무상태표 (있으면)
+    if "dart_balance" in data:
+        bal = data["dart_balance"]
+        cols = [c for c in DART_BALANCE_COLS if c in bal.columns]
+        bal = bal[["종목코드"] + cols].rename(columns={c: f"DART_{c}" for c in cols})
+        base = base.merge(bal, on="종목코드", how="left")
+
+    # 시가총액 (있으면)
+    if "market_cap" in data:
+        mc = data["market_cap"]
+        cols = [c for c in MARKET_CAP_COLS if c in mc.columns]
+        base = base.merge(mc[["종목코드"] + cols], on="종목코드", how="left")
+
     return base
 
 
@@ -128,8 +170,8 @@ def apply_common_filters(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     if config.get("exclude_spac", True):
         df = df[~df["종목명"].str.contains("스팩|SPAC", na=False)]
 
-    # 최소 시가총액 필터 (snapshot의 BPS * 발행주식수로 근사)
-    # 직접 시가총액 컬럼이 없으므로 PBR × BPS × 주식수로 추정
+    # 최소 시가총액 필터: 실제 시가총액(시가총액_억원)이 있으면 그것을 쓰고,
+    # 없으면 snapshot의 PBR × BPS × 주식수로 추정
     pbr_col = _best_col(df, _recent_cols(df, "_PBR(배)"))
     bps_col = _best_col(df, _recent_cols(df, "_BPS(원)"))
     if "발행주식수(천주)" in df.columns and pbr_col and bps_col:
@@ -139,9 +181,15 @@ def apply_common_filters(df: pd.DataFrame, config: dict) -> pd.DataFrame:
             pd.to_numeric(df["발행주식수(천주)"], errors="coerce") *
             1_000 / 1_0000_0000
         )
-        min_cap = config.get("min_market_cap_억", 0)
-        if min_cap > 0:
-            df = df[df["추정시가총액_억"].fillna(0) >= min_cap]
+    # 종목별로 실제 시가총액 우선, 없으면 추정값
+    cap = pd.Series(np.nan, index=df.index)
+    if "시가총액_억원" in df.columns:
+        cap = pd.to_numeric(df["시가총액_억원"], errors="coerce")
+    if "추정시가총액_억" in df.columns:
+        cap = cap.fillna(df["추정시가총액_억"])
+    min_cap = config.get("min_market_cap_억", 0)
+    if min_cap > 0 and cap.notna().any():
+        df = df[cap.fillna(0) >= min_cap]
 
     print(f"  🔍 공통 필터: {original}개 → {len(df)}개")
     return df

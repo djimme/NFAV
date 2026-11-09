@@ -200,46 +200,56 @@ FnGuide가 제공하는 팩터별 Z-Score를 가중 합산해 종합 순위 산�
 
 ---
 
-## 5. NCAV / NFAV (Benjamin Graham)
+## 5. NCAV / NFAV (Benjamin Graham 계열)
 
-**파일:** `strat_ncav_nfav.py`
+**파일:** `strat_ncav_nfav.py` (다른 전략과 같이 `merge_base` 결과를 받아 모듈 안에서 계산)
 
 ### 이론
 
-Benjamin Graham "The Intelligent Investor" 기반.  
-기업 청산가치보다 시가총액이 낮은 종목 = 극단적 저평가.
+기업의 청산가치·순금융자산보다 시가총액이 낮은 종목 = 극단적 저평가.
 
-### 두 지표
+### 지표
 
 **NCAV (Net Current Asset Value)**
 ```
-NCAV    = 유동자산 − 총부채
+NCAV    = 유동자산 − 부채총계
 NCAV_R  = NCAV / 시가총액
 ```
-- NCAV_R > 1: 시가총액 < 순유동자산 → 극단적 저평가
-- Graham 기준: NCAV_R ≥ 1.5 권장
+- NCAV_R > 1: 시가총액 < 순유동자산 → 극단적 저평가 (Graham 권장 ≥ 1.5)
 
-**NFAV (Net Fixed Asset Value)**
-- 유동자산 외에 비유동자산(토지·건물 등) 일부도 반영
-- 제조업·자산집약 기업에 유리
+**NFAV (Net Financial Asset Value)** — 두 가지를 함께 계산 (2026-11 결정)
+```
+금융자산 = 현금및현금성자산 + 유동금융자산 + 장기금융자산
+NFAV_A  = 금융자산 − 부채총계 − 비지배지분          (보수적 · nfav.py 기준, 사경인식 NCAV 변형)
+NFAV_B  = 금융자산 − 이자부부채                    (재무구조 · 순현금)
+          이자부부채 = 차입금 + 사채 + 유동성장기부채 + 리스부채
+```
+- 선정: `NFAV_B_R > min_nfav_b_r`(기본 0, 순현금 기업)로 거른 뒤 `NFAV_A_R` 높은 순으로 `top_n`
+- 검산: NFAV_B − NFAV_A = (부채총계 − 이자부부채) + 비지배지분 = 이자 없는 영업부채 + 비지배지분
 
 ### 데이터 소스
 
-`calc_NCAV.py`, `calc_NFAV.py`의 실행 결과 파일 (사전 계산 필요):
-- `derived/ncav_output_*.xlsx`
-- `derived/nfav_output_*.xlsx`
+`strat_utils.load_all_data()`가 읽어 `merge_base()`에서 `DART_*` 컬럼으로 합친다.
+- `derived/dart_balance_YYYY_MM.xlsx` ← `python apiCollect.py dart_balance` (OpenDART 최신 재무상태표)
+- `derived/market_cap_YYYY_MM_DD.xlsx` ← `python apiCollect.py krx_marketcap` (KRX Open API, 전 종목 일괄 · 대체: `kb_marketcap`)
 
-### 파라미터 (DATA_CONFIG)
+### 파라미터 (STRATEGY_CONFIG)
 
-| 키 | 기본값 |
-|----|--------|
-| `ncav_output_pattern` | `"derived/ncav_output_*.xlsx"` |
-| `nfav_output_pattern` | `"derived/nfav_output_*.xlsx"` |
+| 키 | 기본값 | 설명 |
+|----|--------|------|
+| `ncav.min_ncav_r` | 0.0 | NCAV_R 최솟값 |
+| `ncav.require_positive_income` | True | 당기순이익(누적) > 0 |
+| `nfav.min_nfav_b_r` | 0.0 | NFAV_B / 시총 최솟값 |
+| `nfav.min_nfav_a_r` | None | NFAV_A / 시총 최솟값 (None = 순위만) |
+| `nfav.max_debt_ratio` | 150.0 | 부채비율(%) 최대값 |
+| `nfav.top_n` | 30 | 선정 종목 수 |
 
 ### 주의사항
 
-- NCAV 전략은 소형주·저유동성 종목 집중 경향 → 실제 매수 가능성 별도 검토
-- calc_NCAV.py / calc_NFAV.py를 먼저 실행해야 결과 파일 생성됨
+- 금융업(은행·증권·보험)은 유동/비유동 구분이 없어 제외
+- 창투사는 보유 지분 공정가치가 금융자산에 크게 잡혀 NFAV가 과대해질 수 있음
+- 소형주·저유동성 종목 집중 경향 → 실제 매수 가능성 별도 검토
+- 이전 방식(`calc_NCAV.py`, `calc_NFAV.py` → `*_output_*.xlsx`)은 더 이상 쓰지 않음 (파일은 보존)
 
 ---
 

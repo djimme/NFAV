@@ -1,6 +1,8 @@
 # agent_config.py
 # 주식 매매 Agent 설정 파일
-# KIS API 키 및 전략 파라미터를 여기서 관리합니다.
+# 전략 파라미터를 여기서 관리합니다. API 키는 .env 에서 읽습니다 (커밋 금지).
+
+from fin_utils import get_env
 
 # =============================================================================
 # KIS (한국투자증권) API 설정
@@ -8,19 +10,19 @@
 # =============================================================================
 KIS_CONFIG = {
     # 실전투자 / 모의투자 구분
-    "is_paper_trading": True,  # True: 모의투자, False: 실전투자
+    "is_paper_trading": get_env("KIS_PAPER", "true").lower() == "true",  # True: 모의투자, False: 실전투자
 
-    # API 키 (KIS 개발자 포털에서 발급)
-    "app_key": "YOUR_APP_KEY",
-    "app_secret": "YOUR_APP_SECRET",
+    # API 키 (KIS 개발자 포털에서 발급) — .env 의 KIS_* 항목
+    "app_key": get_env("KIS_APP_KEY", "YOUR_APP_KEY"),
+    "app_secret": get_env("KIS_APP_SECRET", ""),
 
     # API 기본 URL
     "base_url_real": "https://openapi.koreainvestment.com:9443",
     "base_url_paper": "https://openapivts.koreainvestment.com:29443",
 
     # 계좌 정보
-    "account_no": "YOUR_ACCOUNT_NO",  # 예: "12345678"
-    "account_type": "01",             # 01: 위탁계좌
+    "account_no": get_env("KIS_ACCOUNT_NO", ""),  # 예: "12345678"
+    "account_type": get_env("KIS_ACCOUNT_TYPE", "01"),             # 01: 위탁계좌
 }
 
 # =============================================================================
@@ -29,13 +31,15 @@ KIS_CONFIG = {
 DATA_CONFIG = {
     "data_dir": "derived",
     "snapshot_file": "derived/snapshot_2026_04.xlsx",
-    "finance_file": "derived/finance_2026_04.xlsx",
-    "ratio_file": "derived/finance_ratio_2026_04.xlsx",
+    # _v2: 부분연도 열을 '연간'으로 저장하던 파서 버그 수정 후 재생성 (scripts/rebuild_from_cache.py)
+    "finance_file": "derived/finance_2026_04_v2.xlsx",
+    "ratio_file": "derived/finance_ratio_2026_04_v2.xlsx",
     "invest_idx_file": "derived/invest_idx_2026_04.xlsx",
 
-    # NCAV 결과 파일 (calc_NCAV.py 실행 결과)
-    "ncav_output_pattern": "derived/ncav_output_*.xlsx",
-    "nfav_output_pattern": "derived/nfav_output_*.xlsx",
+    # 공식 API 원천 데이터 (python apiCollect.py dart_balance / krx_marketcap) — 가장 최근 파일 사용
+    #   시가총액 대체 소스: kb_marketcap → derived/market_cap_kb_*.xlsx (필요 시 아래 경로를 바꿔 사용)
+    "dart_balance_file": "derived/dart_balance_*.xlsx",
+    "market_cap_file": "derived/market_cap_2*.xlsx",   # KRX (market_cap_kb_* 는 제외)
 }
 
 # =============================================================================
@@ -84,12 +88,16 @@ STRATEGY_CONFIG = {
         "require_positive_income": True,
     },
 
-    # --- NFAV 전략 (보수적 가치투자) ---
+    # --- NFAV 전략 (순금융자산: A 보수적 · B 재무구조) ---
+    #   A = 금융자산 − 부채총계 − 비지배지분,  B = 금융자산 − 이자부부채
+    #   B_R > min_nfav_b_r 로 거른 뒤 A_R 높은 순으로 top_n
     "nfav": {
         "enabled": True,
-        "min_nfav_r": 0.5,
-        "max_debt_ratio": 150.0,
+        "min_nfav_b_r": 0.0,      # NFAV_B / 시총 최솟값 (0 = 순현금 기업)
+        "min_nfav_a_r": None,     # NFAV_A / 시총 최솟값 (None = 컷 없이 순위만)
+        "max_debt_ratio": 150.0,  # 부채비율 최대값 (%)
         "require_positive_income": True,
+        "top_n": 30,
     },
 }
 

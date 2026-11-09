@@ -142,7 +142,7 @@ def run_all_strategies(config: dict, strategy_cfg: dict, composite_weights: dict
         if strategy_cfg.get("multifactor", {}).get("enabled", True) else pd.DataFrame()
 
     print("\n[5/5] NCAV / NFAV (Benjamin Graham)")
-    ncav_df, nfav_df = strategy_ncav_nfav(config)
+    ncav_df, nfav_df = strategy_ncav_nfav(base, strategy_cfg.get("ncav", {}), strategy_cfg.get("nfav", {}))
     results["ncav"] = ncav_df
     results["nfav"] = nfav_df
 
