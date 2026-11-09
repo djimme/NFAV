@@ -2,7 +2,8 @@
 FnGuide FinanceRatio 페이지 (SVD_FinanceRatio.asp) 데이터 수집 및 파싱
 
 업종별 재무비율 수집:
-- 연결 누적 (Annual)  : 연도별 재무비율 → 컬럼 형식 {YYYY(누적)}_{지표명}
+- 연결 누적 (Annual)  : 연도별 재무비율 → 컬럼 형식 {YYYY(누적)}_{지표명}  (결산월에 끝나는 완전 회계연도)
+                        최근 부분연도 열은 {YYYY/NQ(부분누적)}_{지표명} 으로 분리
 - 연결 3개월 (Quarterly): 분기별 재무비율 → 컬럼 형식 {YYYY/MM}_{지표명}
 
 업종별 지표 (통합 컬럼명으로 매핑):
@@ -191,7 +192,8 @@ def parseFnguideFiRatio(html):
         data['결산월'] = fiscal_month
 
     # 연결 누적 (Annual) — 컬럼 형식: {YYYY(누적)}_{지표명}, 연도별 최신 기간, 최근 4개년
-    annual_data = _parse_grid_section(soup, 'grid1', period_format='year', max_periods=4)
+    annual_data = _parse_grid_section(soup, 'grid1', period_format='year', max_periods=4,
+                                      fiscal_month=fiscal_month)
     if annual_data is None:
         return None
     data.update(annual_data)
@@ -220,7 +222,7 @@ def collectFinanceRatio(code):
 
 # --- Private parse helpers ---
 
-def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None):
+def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None, fiscal_month=None):
     """
     grid1(연결 누적) 또는 grid2(연결 3개월) 섹션에서 재무비율 추출
 
@@ -247,8 +249,18 @@ def _parse_grid_section(soup, grid_id, period_format='year', max_periods=None):
         return None
 
     # (period_key, original_col_index) 목록 생성
-    if period_format == 'year':
-        # 연도별 가장 최근 월의 인덱스 선택 후 최근 max_periods년
+    if period_format == 'year' and fiscal_month:
+        # 결산월에 끝나는 열만 '{YYYY}(누적)' (완전 회계연도), 최근 부분연도 1개는 따로 라벨
+        full = [(y, m, i) for i, (y, m) in enumerate(periods) if int(m) == int(fiscal_month)]
+        part = [(y, m, i) for i, (y, m) in enumerate(periods) if int(m) != int(fiscal_month)]
+        if max_periods:
+            full = full[-max_periods:]
+        key_idx_list = [(f'{y}(누적)', i) for y, m, i in full]
+        if part and (not full or part[-1][2] > full[-1][2]):
+            y, m, i = part[-1]
+            key_idx_list.append((f'{y}/{_month_to_quarter(m)}(부분누적)', i))
+    elif period_format == 'year':
+        # 결산월 정보가 없으면 기존 방식: 연도별 가장 최근 월의 인덱스 선택 후 최근 max_periods년
         year_to_latest = {}
         for i, (year, month) in enumerate(periods):
             if year not in year_to_latest or month > year_to_latest[year][0]:

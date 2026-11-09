@@ -10,8 +10,12 @@ FnGuide Finance 페이지 (SVD_Finance.asp) 데이터 수집 및 파싱
   영업활동현금흐름, 투자활동현금흐름, 재무활동현금흐름, 현금성자산증가
 
 컬럼 형식:
-  연간 : {YYYY}(연간)_{지표명}    (예: 2024(연간)_당기순이익)
-  분기 : {YYYY/NQ}_{지표명}       (예: 2024/4Q_당기순이익)
+  연간 : {YYYY}(연간)_{지표명}       (예: 2024(연간)_당기순이익)  — 결산월에 끝나는 완전 회계연도만
+  누적 : {YYYY/NQ}(누적)_{지표명}    (예: 2025/3Q(누적)_당기순이익) — 연간 표의 최근 부분연도 열
+  분기 : {YYYY/NQ}_{지표명}          (예: 2024/4Q_당기순이익)
+
+  FnGuide 연간 표는 '최근 결산 분기 + 직전 회계연도'를 함께 보여주므로(이용안내),
+  기간말 월이 결산월과 다른 열은 연간이 아니라 그 시점까지의 누적값이다.
 
 컬럼 순서:
   지표명별로 연간 데이터 컬럼이 먼저 나온 후, 분기 데이터 컬럼이 이어짐
@@ -91,12 +95,12 @@ def parseFnguideFinance(html):
     data['연결여부'] = first_th.get_text(strip=True) if first_th else ''
 
     # 손익계산서: 지표명별 연간 → 분기 순서로 추가
-    sonik_y = _process_table(soup, '#divSonikY', _SONIK_TARGETS, annual=True)
+    sonik_y = _process_table(soup, '#divSonikY', _SONIK_TARGETS, annual=True, fiscal_month=fiscal_month)
     sonik_q = _process_table(soup, '#divSonikQ', _SONIK_TARGETS, annual=False)
     _merge_by_metric(data, sonik_y, sonik_q, _SONIK_TARGETS)
 
     # 현금흐름표: 지표명별 연간 → 분기 순서로 추가
-    cash_y = _process_table(soup, '#divCashY', _CASH_TARGETS, annual=True)
+    cash_y = _process_table(soup, '#divCashY', _CASH_TARGETS, annual=True, fiscal_month=fiscal_month)
     cash_q = _process_table(soup, '#divCashQ', _CASH_TARGETS, annual=False)
     _merge_by_metric(data, cash_y, cash_q, _CASH_TARGETS)
 
@@ -158,7 +162,25 @@ def _parse_number(text):
         return None
 
 
-def _process_table(soup, section_id, targets, annual):
+def _annual_columns(date_cols, fiscal_month):
+    """연간 표의 날짜 열을 (인덱스, 기간, 라벨)로 분류한다.
+
+    - 결산월에 끝나는 열: 최근 3개 완전 회계연도 → '{YYYY}(연간)'
+    - 결산월과 다른 열(최근 부분연도): 가장 최근 1개 → '{YYYY/NQ}(누적)'
+    - 결산월을 모르면 기존 방식(최근 3개 열, '{YYYY}(연간)') 유지
+    """
+    if not fiscal_month:
+        return [(i, p, f"{p.split('/')[0]}(연간)") for i, p in date_cols[-3:]]
+    full = [(i, p) for i, p in date_cols if int(p.split('/')[1]) == int(fiscal_month)]
+    part = [(i, p) for i, p in date_cols if int(p.split('/')[1]) != int(fiscal_month)]
+    out = [(i, p, f"{p.split('/')[0]}(연간)") for i, p in full[-3:]]
+    if part and (not full or part[-1][0] > full[-1][0]):
+        i, p = part[-1]
+        out.append((i, p, f'{_to_quarter_label(p)}(누적)'))
+    return out
+
+
+def _process_table(soup, section_id, targets, annual, fiscal_month=None):
     """테이블에서 targets에 해당하는 행 데이터를 추출해 {col_name: {key: value}} dict로 반환"""
     result = {}
     el = soup.select_one(section_id)
@@ -169,9 +191,9 @@ def _process_table(soup, section_id, targets, annual):
     date_cols = _parse_date_columns(headers)
 
     if annual:
-        date_cols = date_cols[-3:]  # 최근 3개 완전 회계연도
+        labeled = _annual_columns(date_cols, fiscal_month)  # 완전 회계연도 3개 + 부분연도 누적 1개
     else:
-        date_cols = date_cols[-4:]  # 최근 4분기
+        labeled = [(i, p, _to_quarter_label(p)) for i, p in date_cols[-4:]]  # 최근 4분기
 
     body_rows = el.select('tbody tr')
 
@@ -181,14 +203,10 @@ def _process_table(soup, section_id, targets, annual):
             continue
         cells = tr.select('th, td')
         col_entries = {}
-        for col_idx, period in date_cols:
+        for col_idx, period, period_label in labeled:
             if col_idx >= len(cells):
                 continue
             raw = cells[col_idx].get_text(strip=True)
-            if annual:
-                period_label = f"{period.split('/')[0]}(연간)"
-            else:
-                period_label = _to_quarter_label(period)
             col_entries[f'{period_label}_{col_name}'] = _parse_number(raw)
         if col_entries:
             result[col_name] = col_entries
