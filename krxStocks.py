@@ -12,8 +12,7 @@ def getKrxStocks():
     base_url: str = "https://kind.krx.co.kr/corpgeneral/corpList.do"
     save_path: str = "./corpCode/comp_list.html"
 
-    if os.path.exists(save_path):
-        os.remove(save_path)
+    # 기존 파일은 아래 write_bytes 가 덮어쓴다 (따로 삭제하지 않음)
 
     # KIND 상장종목현황 화면의 EXCEL 버튼과 동일한 요청을 날려 엑셀 파일을 저장한다.
     # 필요한 경우 params 값을 F12 개발자 도구 내 Network 탭에서 확인 후 수정한다.
@@ -47,9 +46,46 @@ def getKrxStocks():
     print("[   Data 예제   ] \n", code_df.head())
     return code_df
 
+def getStocksKrxApi(base_date=None):
+    """
+    KRX Open API 종목기본정보(유가증권·코스닥)에서 보통주 종목 리스트를 만든다.
+
+    FnGuide lookup_data.asp 가 2026-11 사이트 개편으로 사라져(wcomp.fnguide.com 404) 이 함수로 대체했다.
+    기존 FnGuide 'Company' 분류와 같은 기준: 주권·외국주권·주식예탁증권 중 보통주, 스팩·리츠·투자회사 제외.
+
+    Returns:
+        DataFrame: 종목분류, 종목코드, 종목명, 시장정보 (getStocksFnguide()와 같은 컬럼)
+    """
+    from fin_utils import get_env
+    from krxMarketCap import latest_trading_day
+
+    day = base_date or latest_trading_day()
+    key = get_env('KRX_API_KEY')
+    if not key:
+        raise RuntimeError('.env 에 KRX_API_KEY 가 없습니다.')
+    rows = []
+    for svc, market in [('sto/stk_isu_base_info', '유가증권시장'), ('sto/ksq_isu_base_info', '코스닥')]:
+        r = requests.get(f'https://data-dbg.krx.co.kr/svc/apis/{svc}', headers={'AUTH_KEY': key},
+                         params={'basDd': day}, timeout=30)
+        r.raise_for_status()
+        for it in r.json().get('OutBlock_1', []):
+            if it.get('SECUGRP_NM') not in ('주권', '외국주권', '주식예탁증권'):
+                continue  # 리츠(부동산투자회사)·인프라투융자·투자회사 제외
+            if it.get('KIND_STKCERT_TP_NM') != '보통주':
+                continue  # 우선주·종류주 제외
+            name = it.get('ISU_ABBRV', '')
+            rows.append({'종목분류': 'SPAC' if '스팩' in name else 'Company',
+                         '종목코드': str(it.get('ISU_SRT_CD', '')).zfill(6),
+                         '종목명': name, '시장정보': market})
+    df = pd.DataFrame(rows, columns=['종목분류', '종목코드', '종목명', '시장정보'])
+    print(f"[KRX API] 기준일 {day}: 보통주 {len(df)}개 (스팩 {int((df['종목분류'] == 'SPAC').sum())}개 포함)")
+    return df
+
+
 def getStocksFnguide():
     """
-    FnGuide lookup_data.asp API에서 전체 종목 리스트 추출
+    [사용 중단] FnGuide lookup_data.asp API에서 전체 종목 리스트 추출
+    2026-11 FnGuide 사이트 개편으로 comp.fnguide.com/SVO2 경로가 404가 되어 동작하지 않는다 → getStocksKrxApi() 사용
 
     Returns:
         DataFrame: 종목분류, 종목코드, 종목명, 시장정보 컬럼을 가진 DataFrame
@@ -133,15 +169,16 @@ def getStocksFnguide():
 
 
 def collectCorpList():
-    """KRX KIND와 FnGuide API 데이터를 합쳐 종목 리스트를 생성한다.
+    """KRX Open API 종목기본정보와 KRX KIND 업종/주요제품을 합쳐 종목 리스트를 생성한다.
 
-    FnGuide 기준 종목에 KRX의 업종/주요제품 정보를 병합한다.
+    (2026-11 이전에는 FnGuide lookup_data.asp 를 기준으로 했으나 사이트 개편으로 KRX API로 대체)
+    KRX API 기준 종목에 KIND의 업종/주요제품 정보를 병합한다.
     KRX에 없는 종목은 'NA'로 채운다.
 
     Returns:
         DataFrame: 종목분류, 종목코드, 종목명, 시장정보, 업종, 주요제품
     """
-    df_fnguide = getStocksFnguide()
+    df_fnguide = getStocksKrxApi()  # 변수명은 기존 코드와의 호환을 위해 유지
     df_krx = getKrxStocks()[['종목코드', '업종', '주요제품']]
 
     # KRX 종목코드를 6자리 문자열로 변환 (pd.read_html이 정수로 읽는 경우 대비)
@@ -215,6 +252,10 @@ def getCorpList(mode='merged'):
         df_complist = getStocksFnguide()
     else:
         df_complist, df_etf_etn = collectCorpList()
+
+    # 빈 리스트는 저장하지 않는다 (저장하면 같은 달 동안 '기존 파일 사용'으로 0개가 계속 쓰인다)
+    if df_complist is None or len(df_complist) == 0:
+        raise RuntimeError('종목 리스트가 비어 있어 저장하지 않았습니다. 수집 소스(KRX API·KIND) 응답을 확인하세요.')
 
     # Excel 저장
     save_styled_excel(df_complist, corpListPath, sheet_name="CorpList")

@@ -143,7 +143,9 @@ def collect(module, codes=None):
         for c, e in list(state['fail'].items())[:5]:
             print('   실패', c, e)
         # 실패 종목은 다음 실행에서 다시 시도되도록 완료 목록에 넣지 않는다
-    return pd.DataFrame(list(state['rows'].values()))
+    # 진행 기록에는 지난 리스트의 종목(상장폐지 등)도 남아 있을 수 있어, 이번 종목 리스트에 있는 것만 내보낸다
+    keep = set(base['scode'])
+    return pd.DataFrame([v for c, v in state['rows'].items() if c in keep])
 
 
 if __name__ == '__main__':
