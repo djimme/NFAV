@@ -23,7 +23,6 @@ import datetime
 import json
 import os
 import re
-import shutil
 
 import requests
 from bs4 import BeautifulSoup
@@ -59,11 +58,7 @@ def getFnGuideMultiFactor(code):
 
     os.makedirs(cache_dir, exist_ok=True)
 
-    # 이전 달 캐시 디렉토리 삭제
-    current_dir_name = os.path.basename(cache_dir)
-    for entry in os.listdir('derived'):
-        if entry.startswith(cache_prefix) and entry != current_dir_name:
-            shutil.rmtree(os.path.join('derived', entry))
+    # 지난달 캐시는 지우지 않고 월별 폴더로 보관한다 (2026-11 변경, fin_utils.fetch_fnguide_page 와 동일)
 
     if os.path.exists(cache_path):
         with open(cache_path, 'r', encoding='utf-8') as f:

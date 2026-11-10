@@ -181,8 +181,8 @@ def collectCorpList():
 def getCorpList(mode='merged'):
     """종목 리스트를 수집하여 Excel로 저장하고 DataFrame으로 반환한다.
 
-    동일 월 Excel이 있으면 읽어서 반환하고,
-    이전 달 Excel이 있으면 삭제 후 새로 수집한다.
+    동일 월 Excel이 있으면 읽어서 반환하고, 없으면 새로 수집한다.
+    이전 달 Excel은 지우지 않고 보관한다 (그 달의 FnGuide 캐시와 짝을 맞춰 재생성할 때 필요).
 
     Parameters:
         mode: 'merged' (FnGuide + KRX 병합), 'krx' (KRX만), 'fnguide' (FnGuide만)
@@ -203,12 +203,8 @@ def getCorpList(mode='merged'):
             df_etf_etn = pd.read_excel(etfEtnPath, dtype={'종목코드': str})
         return df_complist, df_etf_etn
 
-    # 이전 달 파일 삭제
+    # 이전 달 파일은 보관한다 (2026-11 변경: 기존에는 삭제)
     os.makedirs('./corpCode', exist_ok=True)
-    prefix = f"corplist_{mode}_"
-    for entry in os.listdir('./corpCode'):
-        if entry.startswith(prefix):
-            os.remove(os.path.join('./corpCode', entry))
 
     # 데이터 수집
     print("="*10 + " Collect Corp List " + "="*10)

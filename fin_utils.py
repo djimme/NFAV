@@ -6,7 +6,7 @@ Excel 저장:
   save_styled_excel_multisheet(sheets, filepath): 멀티시트 서식 저장
 
 HTTP / 캐싱:
-  fetch_fnguide_page(code, asp_page, menu_id, cache_prefix): FnGuide 페이지 다운로드 (캐싱)
+  fetch_fnguide_page(code, asp_page, menu_id, cache_prefix): FnGuide 페이지 다운로드 (월별 폴더 캐싱, 지난달 폴더 보관)
 
 환경변수 (.env):
   load_env()            : 프로젝트 루트의 .env를 os.environ에 로드 (이미 설정된 값은 유지)
@@ -19,7 +19,6 @@ HTML 파싱 공통 헬퍼 (모든 FnGuide 모듈에서 공유):
 import datetime
 import os
 import re
-import shutil
 
 import requests
 from openpyxl import Workbook
@@ -111,11 +110,8 @@ def fetch_fnguide_page(code, asp_page, menu_id, cache_prefix):
 
     os.makedirs(downloadedFileDirectory, exist_ok=True)
 
-    # 이전 달 캐시 디렉토리 삭제
-    currentDirName = os.path.basename(downloadedFileDirectory)
-    for entry in os.listdir('derived'):
-        if entry.startswith(cache_prefix) and entry != currentDirName:
-            shutil.rmtree(os.path.join('derived', entry))
+    # 지난달 캐시는 지우지 않고 월별 폴더로 보관한다 (2026-11 변경).
+    # 컨센서스·PER 등은 그 시점에 저장하지 않으면 다시 구할 수 없어서, 월별 스냅샷이 곧 시점별 이력이 된다.
 
     if os.path.exists(downloadedFilePath):
         return open(downloadedFilePath, "r", encoding="utf-8").read()

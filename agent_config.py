@@ -30,11 +30,13 @@ KIS_CONFIG = {
 # =============================================================================
 DATA_CONFIG = {
     "data_dir": "derived",
-    "snapshot_file": "derived/snapshot_2026_04.xlsx",
-    # _v2: 부분연도 열을 '연간'으로 저장하던 파서 버그 수정 후 재생성 (scripts/rebuild_from_cache.py)
-    "finance_file": "derived/finance_2026_04_v2.xlsx",
-    "ratio_file": "derived/finance_ratio_2026_04_v2.xlsx",
-    "invest_idx_file": "derived/invest_idx_2026_04.xlsx",
+    # FnGuide 수집 결과 (python fngCollect.py all) — '*' 패턴이면 가장 최근 월 파일을 자동 선택
+    #   예: snapshot_2026_04.xlsx 와 snapshot_2026_11.xlsx 가 있으면 11월 파일
+    #   finance·ratio 의 2026_04_v2 는 파서 수정 후 4월 캐시로 재생성한 파일 (scripts/rebuild_from_cache.py)
+    "snapshot_file": "derived/snapshot_2*.xlsx",
+    "finance_file": "derived/finance_2*.xlsx",
+    "ratio_file": "derived/finance_ratio_2*.xlsx",
+    "invest_idx_file": "derived/invest_idx_2*.xlsx",
 
     # 공식 API 원천 데이터 (python apiCollect.py dart_balance / krx_marketcap) — 가장 최근 파일 사용
     #   시가총액 대체 소스: kb_marketcap → derived/market_cap_kb_*.xlsx (필요 시 아래 경로를 바꿔 사용)

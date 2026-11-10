@@ -35,6 +35,12 @@ def load_all_data(config: dict) -> dict:
     """
     print("📂 데이터 파일 로딩 중...")
 
+    # 경로에 '*'가 있으면 가장 최근 파일을 쓴다 (예: derived/snapshot_2*.xlsx → snapshot_2026_11.xlsx)
+    config = dict(config)
+    for k in ("snapshot_file", "invest_idx_file", "finance_file", "ratio_file"):
+        if config.get(k) and "*" in config[k]:
+            config[k] = _latest_file(config[k]) or config[k]
+
     data = {}
 
     # snapshot (단일 시트)
