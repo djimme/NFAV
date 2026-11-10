@@ -110,8 +110,9 @@ def _latest_file(pattern):
 
 # DART 재무상태표에서 base에 합칠 컬럼 (DART_ 접두어로 FnGuide 컬럼과 구분)
 DART_BALANCE_COLS = ["기준기간", "연결구분", "유동구분", "유동자산", "부채총계", "자본총계", "비지배지분",
-                     "현금및현금성자산", "유동금융자산", "장기금융자산", "이자부부채", "리스부채", "당기순이익(누적)"]
-MARKET_CAP_COLS = ["시가총액_억원", "종가", "전일종가", "상장주식수", "기준일", "출처"]
+                     "현금및현금성자산", "유동금융자산", "장기금융자산", "유동금융자산_기타", "장기금융자산_기타",
+                     "이자부부채", "리스부채", "당기순이익(누적)"]
+MARKET_CAP_COLS = ["시가총액_억원", "종가", "전일종가", "상장주식수", "거래량", "거래대금_억원", "기준일", "출처"]
 
 
 def merge_base(data: dict) -> pd.DataFrame:
@@ -196,6 +197,17 @@ def apply_common_filters(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     min_cap = config.get("min_market_cap_억", 0)
     if min_cap > 0 and cap.notna().any():
         df = df[cap.fillna(0) >= min_cap]
+
+    # 거래 없는 종목 제외: 기준일 거래량이 0인 종목(거래정지 등)은 시가총액이 오래된 가격일 수 있다
+    if config.get("exclude_no_trade", True) and "거래량" in df.columns:
+        vol = pd.to_numeric(df["거래량"], errors="coerce")
+        n0 = int((vol == 0).sum())
+        df = df[~(vol == 0)]
+        if n0:
+            print(f"  🔍 거래량 0 종목 제외: {n0}개")
+    min_tv = config.get("min_trading_value_억", 0)
+    if min_tv and "거래대금_억원" in df.columns:
+        df = df[pd.to_numeric(df["거래대금_억원"], errors="coerce").fillna(0) >= min_tv]
 
     print(f"  🔍 공통 필터: {original}개 → {len(df)}개")
     return df

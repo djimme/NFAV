@@ -18,6 +18,8 @@
 #   B (재무구조)             = 금융자산 − 이자부부채(차입금·사채·유동성장기부채·리스부채)
 #       → 갚아야 할 차입보다 쥐고 있는 금융자산이 얼마나 많은가 (순현금)
 #   선정: B > 0 (순현금 기업)으로 거른 뒤 A_R(= A / 시가총액) 높은 순
+#   보수적 옵션(exclude_other_financial=True): 계정명에 '기타'가 붙은 금융자산(기타유동금융자산 등)을 뺀다
+#       → 대여금·보증금처럼 바로 현금화하기 어려운 자산이 섞여 NFAV가 부풀려지는 것을 막는다
 #
 # 제외:
 #   금융업(은행·증권·보험)은 재무상태표에 유동/비유동 구분이 없어 계산하지 않는다.
@@ -47,7 +49,8 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
     if "DART_유동구분" in r.columns:
         r = r[r["DART_유동구분"].astype(str).str.lower().isin(["true", "1"])]
     for c in ["DART_유동자산", "DART_부채총계", "DART_자본총계", "DART_비지배지분", "DART_현금및현금성자산",
-              "DART_유동금융자산", "DART_장기금융자산", "DART_이자부부채", "DART_리스부채",
+              "DART_유동금융자산", "DART_장기금융자산", "DART_유동금융자산_기타", "DART_장기금융자산_기타",
+              "DART_이자부부채", "DART_리스부채",
               "DART_당기순이익(누적)", "시가총액_억원"]:
         r[c] = _num(r, c)
     r = r[r["시가총액_억원"] > 0]
@@ -78,6 +81,9 @@ def calc_nfav(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         return r
     r = r[r["DART_현금및현금성자산"].notna() & r["DART_부채총계"].notna()]
     r["금융자산"] = r["DART_현금및현금성자산"] + r["DART_유동금융자산"].fillna(0) + r["DART_장기금융자산"].fillna(0)
+    r["기타금융자산"] = r["DART_유동금융자산_기타"].fillna(0) + r["DART_장기금융자산_기타"].fillna(0)
+    if cfg.get("exclude_other_financial", False):
+        r["금융자산"] = r["금융자산"] - r["기타금융자산"]
     r["NFAV_A"] = r["금융자산"] - r["DART_부채총계"] - r["DART_비지배지분"].fillna(0)
     r["NFAV_B"] = r["금융자산"] - r["DART_이자부부채"].fillna(0)
     r["NFAV_A_R"] = r["NFAV_A"] / r["시가총액_억원"]
@@ -97,7 +103,7 @@ def calc_nfav(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     if cfg.get("top_n"):
         r = r.head(cfg["top_n"])
     r["NFAV_점수"] = _normalize(r["NFAV_A_R"])
-    cols = ["종목코드", "종목명", "DART_기준기간", "시가총액_억원", "금융자산", "DART_부채총계", "DART_비지배지분",
+    cols = ["종목코드", "종목명", "DART_기준기간", "시가총액_억원", "금융자산", "기타금융자산", "DART_부채총계", "DART_비지배지분",
             "DART_이자부부채", "NFAV_A", "NFAV_A_R", "NFAV_B", "NFAV_B_R", "부채비율",
             "DART_당기순이익(누적)", "NFAV_점수"]
     return r[[c for c in cols if c in r.columns]].reset_index(drop=True)

@@ -100,6 +100,7 @@ STRATEGY_CONFIG = {
         "max_debt_ratio": 150.0,  # 부채비율 최대값 (%)
         "require_positive_income": True,
         "top_n": 30,
+        "exclude_other_financial": False,  # True: '기타'가 붙은 금융자산(대여금 등 섞일 수 있음)을 금융자산에서 제외
     },
 }
 
@@ -131,4 +132,6 @@ COMMON_FILTERS = {
     "exclude_markets": [],         # 제외할 마켓 (예: ["코스닥 우량기업부"])
     "min_market_cap_억": 100,      # 최소 시가총액 (억원)
     "exclude_spac": True,          # SPAC(기업인수목적회사) 제외
+    "exclude_no_trade": True,      # KRX 기준일 거래량 0 종목(거래정지 등) 제외
+    "min_trading_value_억": 0,     # 기준일 최소 거래대금(억원), 0이면 사용 안 함
 }

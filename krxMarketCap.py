@@ -11,7 +11,7 @@ KRX Open API로 전 종목 일별 시세·시가총액을 수집한다 (1층 원
 
 Public API:
   latest_trading_day(base=None)   : 데이터가 있는 가장 최근 거래일 'YYYYMMDD'
-  collectMarketCapAll(date=None)  : 전 종목 DataFrame (종목코드, 시가총액_억원, 종가, 상장주식수, 기준일, 시장, 출처)
+  collectMarketCapAll(date=None)  : 전 종목 DataFrame (종목코드, 시가총액_억원, 종가, 상장주식수, 거래량, 거래대금_억원, 기준일, 시장, 출처)
 """
 import datetime as dt
 import json
@@ -69,5 +69,7 @@ def collectMarketCapAll(date=None):
             out.append({'종목코드': str(r.get('ISU_CD', '')).zfill(6), 'KRX_종목명': r.get('ISU_NM'),
                         '시장': mkt, '시가총액_억원': round(cap / 1e8, 1) if cap else None,
                         '종가': _num(r.get('TDD_CLSPRC')), '상장주식수': _num(r.get('LIST_SHRS')),
+                        '거래량': _num(r.get('ACC_TRDVOL')),
+                        '거래대금_억원': round(_num(r.get('ACC_TRDVAL')) / 1e8, 2) if _num(r.get('ACC_TRDVAL')) is not None else None,
                         '기준일': f'{day[:4]}-{day[4:6]}-{day[6:]}', '출처': 'KRX'})
     return pd.DataFrame(out)

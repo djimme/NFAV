@@ -243,6 +243,8 @@ NFAV_B  = 금융자산 − 이자부부채                    (재무구조 · �
 | `nfav.min_nfav_a_r` | None | NFAV_A / 시총 최솟값 (None = 순위만) |
 | `nfav.max_debt_ratio` | 150.0 | 부채비율(%) 최대값 |
 | `nfav.top_n` | 30 | 선정 종목 수 |
+| `nfav.exclude_other_financial` | False | True면 계정명에 '기타'가 붙은 금융자산(대여금·보증금 등 섞일 수 있음)을 금융자산에서 제외 |
+| `COMMON_FILTERS.exclude_no_trade` | True | KRX 기준일 거래량 0 종목(거래정지 등) 제외 — 모든 전략 공통 |
 
 ### 주의사항
 

@@ -11,6 +11,7 @@
   python apiCollect.py dart_balance                  # 전 종목
   python apiCollect.py krx_marketcap
   python apiCollect.py dart_balance test 005930 000020
+  python apiCollect.py dart_balance refresh            # 진행 기록 무시하고 다시 집계 (파싱 규칙을 바꾼 뒤)
 
 주의:
   - API 호출 한도 때문에 순차 실행한다(DART 하루 2만 건, KB는 한도 미공개).
@@ -27,6 +28,8 @@ import sys
 import pandas as pd
 
 from fin_utils import save_styled_excel
+
+REFRESH = False
 
 MODULE_CONFIG = {
     'dart_balance': {
@@ -90,7 +93,10 @@ def collect(module, codes=None):
     # 중간 저장: 100종목마다 derived/_api_tmp/{module}.pkl 에 저장하고, 다시 실행하면 이어서 진행
     tmp = os.path.join('derived', '_api_tmp', f'{module}{"_test" if codes else ""}.pkl')
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
-    state = pd.read_pickle(tmp) if os.path.exists(tmp) else {'rows': {}, 'nodata': [], 'fail': {}}
+    fresh = {'rows': {}, 'nodata': [], 'fail': {}}
+    state = fresh if (REFRESH or not os.path.exists(tmp)) else pd.read_pickle(tmp)
+    if REFRESH:
+        print('refresh: 진행 기록을 무시하고 처음부터 다시 만든다 (API 응답 캐시는 그대로 사용)')
     done = set(state['rows']) | set(state['nodata'])
     todo = [r for r in base.itertuples(index=False) if r.scode not in done]
     print(f'이어서 진행: 완료 {len(done)}, 남은 종목 {len(todo)}')
@@ -147,6 +153,9 @@ if __name__ == '__main__':
         print('  module:', ', '.join(MODULE_CONFIG))
         sys.exit(1)
     module = args[0]
+    if 'refresh' in args:
+        REFRESH = True
+        args = [a for a in args if a != 'refresh']
     codes = args[2:] if len(args) > 1 and args[1] == 'test' else None
     if len(args) > 1 and args[1] == 'test' and not codes:
         codes = ['005930']

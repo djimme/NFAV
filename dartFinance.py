@@ -7,6 +7,7 @@ FnGuide 모듈(fnguideFinance.py 등)과 같은 구조: 종목 단위 collect �
 수집 데이터 (재무상태표 + 당기순이익, 최신 공시 기준):
   유동자산, 부채총계, 자본총계, 비지배지분
   현금및현금성자산, 유동금융자산, 장기금융자산      → NFAV 금융자산
+  유동금융자산_기타, 장기금융자산_기타              → 그중 계정명에 '기타'가 붙은 금액 (대여금 등 성격이 섞일 수 있음)
   이자부부채(차입금·사채·유동성장기부채·리스부채), 그중 리스부채 → NFAV B
   당기순이익(누적) — 해당 보고서의 연초 누적값
   메타: 기준기간, 보고서코드, 사업연도, 연결구분(CFS/OFS), 접수번호, 유동구분여부
@@ -114,7 +115,8 @@ def parseBalance(rows):
     """재무상태표를 공시 순서(ord)대로 읽어 구간(유동자산/비유동자산/유동부채/비유동부채)별로 집계한다."""
     bs = sorted([r for r in rows if r.get('sj_div') == 'BS'], key=lambda r: int(r.get('ord') or 0))
     d = dict(유동자산=None, 부채총계=None, 자본총계=None, 비지배지분=0.0, 현금및현금성자산=None,
-             유동금융자산=0.0, 장기금융자산=0.0, 이자부부채=0.0, 리스부채=0.0)
+             유동금융자산=0.0, 장기금융자산=0.0, 유동금융자산_기타=0.0, 장기금융자산_기타=0.0,
+             이자부부채=0.0, 리스부채=0.0)
     sec, fin_used, debt_used = None, [], []
     ids = {r.get('account_id') for r in bs}
     for r in bs:
@@ -141,6 +143,8 @@ def parseBalance(rows):
             continue
         if sec in ('ca', 'nca') and ('금융' in nm or '단기투자' in nm) and '리스' not in nm and '매출' not in nm:
             d['유동금융자산' if sec == 'ca' else '장기금융자산'] += v
+            if '기타' in nm:  # 기타유동금융자산, 기타 비유동 금융자산 등
+                d['유동금융자산_기타' if sec == 'ca' else '장기금융자산_기타'] += v
             fin_used.append(f"{'유동' if sec == 'ca' else '비유동'}:{nm}")
         elif sec in ('cl', 'ncl') and any(k in nm for k in DEBT_KEYS) and '금융부채' not in nm:
             d['이자부부채'] += v
