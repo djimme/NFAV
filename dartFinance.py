@@ -76,6 +76,9 @@ def fetch_statement(corp, year, reprt, fs):
     j = r.json()
     if j.get('status') in ('000', '013'):
         json.dump(j, open(path, 'w', encoding='utf-8'), ensure_ascii=False)
+    else:
+        # 키 오류(010·011)·한도 초과(020)·점검(800) 등은 조용히 넘기지 않고 원인을 알린다
+        raise RuntimeError(f"DART {j.get('status')} {j.get('message')}")
     time.sleep(0.2)
     return j
 

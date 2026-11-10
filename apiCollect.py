@@ -14,7 +14,8 @@
 
 주의:
   - API 호출 한도 때문에 순차 실행한다(DART 하루 2만 건, KB는 한도 미공개).
-  - 응답은 derived/dart_cache, derived/kb_cache 에 저장되어 중단 후 다시 실행하면 이어서 진행된다.
+  - 응답은 derived/dart_cache, derived/kb_cache 에, 진행 상황은 derived/_api_tmp/ 에 저장되어
+    중단 후 다시 실행하면 이어서 진행된다(실패 종목은 재시도). 실패 원인은 _api_tmp/*_failures.txt 에 남는다.
   - 종목 리스트는 corpCode/ 의 가장 최근 corplist_merged_*.xlsx 를 읽는다.
     (krxStocks.getCorpList()는 지난달 파일을 지우고 새로 받으므로 여기서는 호출하지 않는다)
 """
@@ -31,6 +32,7 @@ MODULE_CONFIG = {
     'dart_balance': {
         'description': 'OpenDART 재무상태표 (fnlttSinglAcntAll)',
         'output': lambda now: f'derived/dart_balance_{now:%Y_%m}.xlsx',
+        'workers': 3,  # 동시 호출 수 (DART 과다 호출 제한을 고려해 작게 유지)
     },
     'krx_marketcap': {
         'description': 'KRX 일별매매정보 시가총액 (유가증권·코스닥)',
@@ -85,21 +87,57 @@ def collect(module, codes=None):
     base = latest_corp_list()
     if codes:
         base = base[base['scode'].isin(codes)]
-    rows, fail = [], []
-    for i, r in enumerate(base.itertuples(index=False), 1):
+    # 중간 저장: 100종목마다 derived/_api_tmp/{module}.pkl 에 저장하고, 다시 실행하면 이어서 진행
+    tmp = os.path.join('derived', '_api_tmp', f'{module}{"_test" if codes else ""}.pkl')
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
+    state = pd.read_pickle(tmp) if os.path.exists(tmp) else {'rows': {}, 'nodata': [], 'fail': {}}
+    done = set(state['rows']) | set(state['nodata'])
+    todo = [r for r in base.itertuples(index=False) if r.scode not in done]
+    print(f'이어서 진행: 완료 {len(done)}, 남은 종목 {len(todo)}')
+    new_fail = 0
+    workers = MODULE_CONFIG[module].get('workers', 1)
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _run(r):
         try:
-            d = fn(r.scode)
-        except Exception as e:  # 한 종목 실패가 전체를 멈추지 않게
-            d = None
-            fail.append((r.scode, str(e)[:80]))
-        if d:
-            rows.append({'종목코드': r.scode, '종목명': r.sname, '업종': r.industry, '주요제품': r.products, **d})
-        if i % 100 == 0:
-            print(f'  {i}/{len(base)} (성공 {len(rows)}, 실패 {len(fail)})', flush=True)
-    print(f'성공 {len(rows)} / 전체 {len(base)}, 실패 {len(fail)}')
-    for c, e in fail[:10]:
-        print('   실패', c, e)
-    return pd.DataFrame(rows)
+            return r, fn(r.scode), None
+        except Exception as e:
+            return r, None, e
+
+    pool = ThreadPoolExecutor(max_workers=workers)
+    for i, (r, d, err) in enumerate(pool.map(_run, todo), 1):
+        try:
+            if err:
+                raise err
+            state['fail'].pop(r.scode, None)
+            if d:
+                state['rows'][r.scode] = {'종목코드': r.scode, '종목명': r.sname, '업종': r.industry,
+                                          '주요제품': r.products, **d}
+            else:
+                state['nodata'].append(r.scode)  # 고유번호 없음·공시 없음
+        except Exception as e:  # 한 종목 실패가 전체를 멈추지 않게 (실패 종목은 다음 실행 때 다시 시도)
+            state['fail'][r.scode] = str(e)[:120]
+            new_fail += 1
+            # 처음 20종목이 모두 실패하면 키·네트워크 문제로 보고 중단
+            if i == 20 and new_fail == 20:
+                pd.to_pickle(state, tmp)
+                raise SystemExit(f'처음 20종목이 모두 실패해 중단합니다. 원인: {str(e)[:200]}')
+        if i % 100 == 0 or i == len(todo):
+            pd.to_pickle(state, tmp)
+            print(f"  {i}/{len(todo)} (누적 성공 {len(state['rows'])}, 공시없음 {len(state['nodata'])}, "
+                  f"실패 {len(state['fail'])})", flush=True)
+    pd.to_pickle(state, tmp)
+    print(f"성공 {len(state['rows'])} / 전체 {len(base)}, 공시없음 {len(state['nodata'])}, 실패 {len(state['fail'])}")
+    if state['fail']:
+        log = os.path.join('derived', '_api_tmp', f'{module}_failures.txt')
+        with open(log, 'w', encoding='utf-8') as f:
+            for c, e in state['fail'].items():
+                f.write(f'{c}\t{e}\n')
+        print(f'   실패 목록: {log} (다시 실행하면 실패 종목만 재시도)')
+        for c, e in list(state['fail'].items())[:5]:
+            print('   실패', c, e)
+        # 실패 종목은 다음 실행에서 다시 시도되도록 완료 목록에 넣지 않는다
+    return pd.DataFrame(list(state['rows'].values()))
 
 
 if __name__ == '__main__':
