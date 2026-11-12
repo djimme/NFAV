@@ -58,20 +58,29 @@ def get_corp_map():
         r = requests.get(f'{API}/corpCode.xml', params={'crtfc_key': _key()}, timeout=60)
         with zipfile.ZipFile(io.BytesIO(r.content)) as z:
             open(path, 'wb').write(z.read('CORPCODE.xml'))
-    _CORP_MAP = {}
+    m = {}
     for el in ET.parse(path).getroot().iter('list'):
         sc = (el.findtext('stock_code') or '').strip()
         if sc:
-            _CORP_MAP[sc] = el.findtext('corp_code').strip()
+            m[sc] = el.findtext('corp_code').strip()
+    _CORP_MAP = m   # 다 채운 뒤에 공개한다 (동시 호출 시 다른 스레드가 채우는 중인 dict를 보지 않게)
     return _CORP_MAP
 
 
-def fetch_statement(corp, year, reprt, fs):
-    """전체 재무제표 1건. 정상(000)·데이터없음(013)만 캐시한다."""
+def fetch_statement(corp, year, reprt, fs, recheck_nodata_days=None):
+    """전체 재무제표 1건. 정상(000)·데이터없음(013)만 캐시한다.
+
+    recheck_nodata_days: 값을 주면, 그 일수보다 오래된 '데이터 없음(013)' 캐시는 다시 조회한다
+    (아직 공시되지 않았던 최근 분기 보고서가 나중에 올라오는 경우).
+    """
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, f'{corp}_{year}_{reprt}_{fs}.json')
     if os.path.exists(path):
-        return json.load(open(path, encoding='utf-8'))
+        j = json.load(open(path, encoding='utf-8'))
+        stale = (recheck_nodata_days is not None and j.get('status') == '013'
+                 and time.time() - os.path.getmtime(path) > recheck_nodata_days * 86400)
+        if not stale:
+            return j
     r = requests.get(f'{API}/fnlttSinglAcntAll.json', timeout=60,
                      params=dict(crtfc_key=_key(), corp_code=corp, bsns_year=str(year), reprt_code=reprt, fs_div=fs))
     j = r.json()

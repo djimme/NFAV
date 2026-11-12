@@ -21,12 +21,13 @@
 #
 # 동적 컬럼 선택:
 #   _recent_cols(suffix, n=2) → [현재연도_컬럼, 전년도_컬럼] 자동 탐색
+#   _latest_values([...], n=2) → 연간 현금흐름·순이익은 종목별로 값이 있는 가장 최근 연도 사용
 #
 # 필터 조건 (STRATEGY_CONFIG["piotroski"] 참조):
 #   - F-Score >= min_score (기본값 6)
 
 import pandas as pd
-from strat_utils import _recent_cols, _best_col, _normalize
+from strat_utils import _recent_cols, _latest_values, _normalize
 
 
 def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
@@ -47,8 +48,11 @@ def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     cur_cur,  cur_prev  = _pair("(누적)_유동비율")
     opm_cur,  opm_prev  = _pair("(누적)_영업이익률")
     ato_cur,  ato_prev  = _pair("(누적)_총자산회전율")
-    cf_col  = _best_col(result, _recent_cols(result, "(연간)_영업활동현금흐름"))
-    ni_col  = _best_col(result, _recent_cols(result, "(연간)_당기순이익"))
+    # 연간 현금흐름·순이익은 종목별로 값이 있는 가장 최근 연도(최근 2개 연도 안)를 쓴다.
+    # 결산월이 다른 몇 종목만 채워진 최신 연도 열 때문에 나머지 종목이 결측이 되는 것을 막는다.
+    CF, NI = "(연간)_영업활동현금흐름", "(연간)_당기순이익"
+    annual, annual_year = _latest_values(result, [CF, NI], n=2)
+    cf_v, ni_v = annual[CF], annual[NI]
 
     scores = pd.DataFrame(index=result.index)
 
@@ -59,10 +63,7 @@ def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         scores["F1_ROA양수"] = 0
 
     # F2: 영업현금흐름 > 0
-    if cf_col:
-        scores["F2_현금흐름양수"] = (pd.to_numeric(result[cf_col], errors="coerce") > 0).astype(int)
-    else:
-        scores["F2_현금흐름양수"] = 0
+    scores["F2_현금흐름양수"] = (cf_v > 0).astype(int)
 
     # F3: ROA 증가
     if roa_cur and roa_prev and roa_cur != roa_prev:
@@ -74,12 +75,7 @@ def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         scores["F3_ROA증가"] = 0
 
     # F4: 영업CF > 당기순이익 (발생주의 품질)
-    if cf_col and ni_col:
-        cf_v = pd.to_numeric(result[cf_col], errors="coerce")
-        ni_v = pd.to_numeric(result[ni_col], errors="coerce")
-        scores["F4_현금흐름품질"] = (cf_v > ni_v).astype(int)
-    else:
-        scores["F4_현금흐름품질"] = 0
+    scores["F4_현금흐름품질"] = (cf_v > ni_v).astype(int)
 
     # F5: 부채비율 감소
     if debt_cur and debt_prev and debt_cur != debt_prev:
@@ -121,6 +117,7 @@ def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         scores["F9_자산회전율개선"] = 0
 
     result["F_Score"] = scores.sum(axis=1)
+    result["연간기준연도"] = annual_year.astype("Int64")
 
     # 필터
     min_score = cfg.get("min_score", 6)
@@ -136,7 +133,7 @@ def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         result[col] = scores.loc[result.index, col]
 
     output_cols = (["종목코드", "종목명", "마켓분야", "FICS분야", "F_Score", "Piotroski_점수"]
-                   + list(scores.columns))
+                   + list(scores.columns) + ["연간기준연도"])
     output_cols = [c for c in output_cols if c in result.columns]
 
     print(f"  📊 Piotroski 전략: {len(result)}개 종목 선정 (F-Score ≥ {min_score})")

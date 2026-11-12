@@ -3,6 +3,8 @@
 
 지원 모듈:
   dart_balance  - OpenDART 최신 재무상태표 + 당기순이익(누적)  → derived/dart_balance_YYYY_MM.xlsx
+  dart_finance  - OpenDART 손익계산서·현금흐름표 (연간·누적·분기, 업종별 시트) → derived/dart_finance_YYYY_MM.xlsx
+                  (FnGuide finance 파일과 같은 컬럼 이름. 종목당 보고서 5~7건을 조회한다)
   krx_marketcap - KRX Open API 전 종목 시가총액·종가·상장주식수 (기본) → derived/market_cap_YYYY_MM_DD.xlsx
                   (시장별 1회 호출로 전 종목. 파일명의 날짜는 KRX 기준 거래일)
   kb_marketcap  - KB증권 종목기업개요 시가총액·PER·PBR (대체 소스, 종목별 호출) → derived/market_cap_kb_YYYY_MM_DD.xlsx
@@ -27,7 +29,7 @@ import sys
 
 import pandas as pd
 
-from fin_utils import save_styled_excel
+from fin_utils import save_styled_excel, save_styled_excel_multisheet
 
 REFRESH = False
 
@@ -36,6 +38,13 @@ MODULE_CONFIG = {
         'description': 'OpenDART 재무상태표 (fnlttSinglAcntAll)',
         'output': lambda now: f'derived/dart_balance_{now:%Y_%m}.xlsx',
         'workers': 3,  # 동시 호출 수 (DART 과다 호출 제한을 고려해 작게 유지)
+    },
+    'dart_finance': {
+        'description': 'OpenDART 손익계산서·현금흐름표 (fnlttSinglAcntAll)',
+        'output': lambda now: f'derived/dart_finance_{now:%Y_%m}.xlsx',
+        'workers': 3,
+        'row_args': True,   # 수집 함수에 종목명·업종도 넘긴다 (업종별 시트 구분)
+        'sheets': True,     # 업종별 멀티시트로 저장
     },
     'krx_marketcap': {
         'description': 'KRX 일별매매정보 시가총액 (유가증권·코스닥)',
@@ -53,6 +62,9 @@ def _get_collect_fn(module):
     if module == 'dart_balance':
         from dartFinance import collectBalance
         return collectBalance
+    if module == 'dart_finance':
+        from dartIncome import collectFinance
+        return collectFinance
     if module == 'kb_marketcap':
         from kbMarketCap import collectMarketCap
         return collectMarketCap
@@ -104,9 +116,11 @@ def collect(module, codes=None):
     workers = MODULE_CONFIG[module].get('workers', 1)
     from concurrent.futures import ThreadPoolExecutor
 
+    row_args = MODULE_CONFIG[module].get('row_args')
+
     def _run(r):
         try:
-            return r, fn(r.scode), None
+            return r, (fn(r.scode, r.sname, r.industry) if row_args else fn(r.scode)), None
         except Exception as e:
             return r, None, e
 
@@ -170,5 +184,9 @@ if __name__ == '__main__':
             out = MODULE_CONFIG[module]['output'](dt.datetime.now())
         if codes:
             out = out.replace('.xlsx', '_test.xlsx')
-        save_styled_excel(df, out)
+        if MODULE_CONFIG[module].get('sheets'):
+            from dartIncome import build_finance_sheets
+            save_styled_excel_multisheet(build_finance_sheets(df), out)
+        else:
+            save_styled_excel(df, out)
         print('저장:', out)

@@ -34,7 +34,9 @@ DATA_CONFIG = {
     #   예: snapshot_2026_04.xlsx 와 snapshot_2026_11.xlsx 가 있으면 11월 파일
     #   finance·ratio 의 2026_04_v2 는 파서 수정 후 4월 캐시로 재생성한 파일 (scripts/rebuild_from_cache.py)
     "snapshot_file": "derived/snapshot_2*.xlsx",
-    "finance_file": "derived/finance_2*.xlsx",
+    #   finance 는 환경변수(또는 .env) NFAV_FINANCE_FILE 로 바꿔 볼 수 있다 — 기본값은 FnGuide 파일 그대로
+    #   예: NFAV_FINANCE_FILE=derived/dart_finance_2*.xlsx  (DART 손익·현금흐름, python apiCollect.py dart_finance)
+    "finance_file": get_env("NFAV_FINANCE_FILE", "derived/finance_2*.xlsx"),
     "ratio_file": "derived/finance_ratio_2*.xlsx",
     "invest_idx_file": "derived/invest_idx_2*.xlsx",
 

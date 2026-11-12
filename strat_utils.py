@@ -234,6 +234,33 @@ def _recent_cols(df: pd.DataFrame, suffix: str, n: int = 3) -> list:
     return [col for _, col in matched[:n]]
 
 
+def _latest_values(df: pd.DataFrame, suffixes: list, n: int = 2) -> tuple:
+    """
+    종목(행)마다 '값이 있는 가장 최근 연도'의 값을 고른다.
+
+    전 종목에 같은 연도 열 하나를 쓰면, 결산월이 달라 몇 종목만 값이 있는 최신 연도 열
+    (예: 3·6월 결산사만 채워진 2026(연간))이 생겼을 때 나머지 종목이 모두 결측이 된다.
+
+    연도는 suffixes[0] 에 값이 있는지로 정하고, 나머지 suffix 는 같은 연도의 값을 쓴다
+    (서로 다른 연도의 값을 비교하지 않도록). 최근 n개 연도까지만 거슬러 올라간다.
+
+    반환: (값 DataFrame — 컬럼은 suffixes, 선택된 연도 Series — 값이 없으면 NaN)
+    """
+    pattern = re.compile(r'^(\d{4})' + re.escape(suffixes[0]) + r'$')
+    years = sorted((int(m.group(1)) for c in df.columns if (m := pattern.match(c))), reverse=True)[:n]
+    vals = pd.DataFrame(float('nan'), index=df.index, columns=suffixes)
+    year = pd.Series(float('nan'), index=df.index)
+    for y in years:
+        key = pd.to_numeric(df[f'{y}{suffixes[0]}'], errors='coerce')
+        take = year.isna() & key.notna()
+        for s in suffixes:
+            col = f'{y}{s}'
+            if col in df.columns:
+                vals.loc[take, s] = pd.to_numeric(df.loc[take, col], errors='coerce')
+        year[take] = y
+    return vals, year
+
+
 def _best_col(df: pd.DataFrame, candidates: list) -> str | None:
     """후보 컬럼 중 DataFrame에 존재하는 첫 번째 반환"""
     for c in candidates:
