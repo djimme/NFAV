@@ -29,6 +29,7 @@ Public API:
   collectFinance(code, name=None, industry=None) : 종목코드 → dict (공시가 없으면 None)
   build_finance_sheets(df)  : 업종별 시트 목록 [(시트명, DataFrame)]
 """
+import calendar
 import datetime as dt
 import json
 import os
@@ -37,6 +38,7 @@ import time
 
 import requests
 
+import ecosFx
 from dartFinance import API, CACHE_DIR, _amt, _key, fetch_statement, get_corp_map
 
 Q_REPRT = {1: '11013', 2: '11012', 3: '11014', 4: '11011'}
@@ -57,7 +59,14 @@ _IS_ACCOUNTS = [
      ['법인세비용차감전순이익', '법인세비용차감전계속사업이익', '법인세차감전순이익', '법인세비용차감전순손익']),
     ('법인세비용', ['ifrs-full_IncomeTaxExpenseContinuingOperations'], ['법인세비용', '법인세비용(수익)']),
     ('당기순이익', ['ifrs-full_ProfitLoss'], ['당기순이익', '분기순이익', '반기순이익', '당기순손익']),
+    # 보험업: 영업수익 = 보험영업수익 + 투자영업수익 (+ 별도 줄로 공시된 기타영업수익)
+    ('_보험영업수익', ['dart_OperatingIncomeInsurance'], ['보험영업수익', '보험서비스수익']),
+    ('_투자영업수익', ['ifrs-full_InvestmentIncome', 'dart_OperatingIncomeInvestment'],
+     ['투자영업수익', '투자서비스수익', '투자수익']),
+    ('_기타영업수익', ['dart_OtherOperatingIncome'], []),
 ]
+# 기타영업수익은 손익계산서에 '기타영업손익' 줄이 따로 있을 때만 더한다 (없으면 보험영업수익의 하위 항목)
+_OTHER_OP_ID = 'ifrs-full_OtherOperatingIncomeExpense'
 _CF_ACCOUNTS = [
     ('영업활동현금흐름', ['ifrs-full_CashFlowsFromUsedInOperatingActivities'], ['영업활동현금흐름', '영업활동으로인한현금흐름']),
     ('투자활동현금흐름', ['ifrs-full_CashFlowsFromUsedInInvestingActivities'], ['투자활동현금흐름', '투자활동으로인한현금흐름']),
@@ -161,8 +170,9 @@ def parse_report(rows, q):
     out = dict(cum={}, q3m={}, prev_cum={}, prev_q3m={}, prev2={})
     srt = lambda div: sorted([r for r in rows if r.get('sj_div') == div], key=lambda r: int(r.get('ord') or 0))
     inc = srt('IS') + srt('CIS')      # 손익계산서를 따로 내는 회사는 IS, 단일 포괄손익계산서는 CIS
+    has_other_op = any(r.get('account_id') == _OTHER_OP_ID for r in inc)
     for m, ids, names in _IS_ACCOUNTS:
-        r = _pick(inc, ids, names)
+        r = _pick(inc, ids, names) if (m != '_기타영업수익' or has_other_op) else None
         if r is None:
             continue
         if q == 4:
@@ -264,8 +274,18 @@ def collectFinance(code, name=None, industry=None, today=None):
     want = sorted(k for k in ((y, q) for y in range(WINDOW_START[0], today.year + 2) for q in (1, 2, 3, 4))
                   if WINDOW_START <= period_end(*k, fm) <= (today.year, today.month))
     notes = []
-    if currency - {'KRW'}:      # 외국 기업: 원화로 환산하지 않은 공시 통화 금액
-        notes.append('표시통화 ' + ','.join(sorted(currency)) + '(원화 환산 안 함, 단위 1억)')
+    sheet = classify_industry(name, industry)
+    fx_cur = None               # 외화로 공시한 기업: 원화로 환산할 통화
+    if currency - {'KRW'}:
+        cur_txt = ','.join(sorted(currency))
+        try:
+            if len(currency) != 1:
+                raise RuntimeError('통화 혼재')
+            ecosFx.rates(cur_txt)
+            fx_cur = cur_txt
+            notes.append(f'표시통화 {cur_txt}(원화 환산: 손익 누적 평균환율, 현금흐름 기말환율)')
+        except (RuntimeError, KeyError) as e:
+            notes.append(f'표시통화 {cur_txt}(원화 환산 안 함, 단위 1억: {e})')
     if len({r['fs'] for r in reports.values()}) > 1:
         notes.append('연결·별도 혼재(' + ','.join(f'{_qlabel(period_end(y, q, fm))}:{r["fs"]}'
                                               for (y, q), r in sorted(reports.items()) if r['fs'] != fs_main) + ')')
@@ -308,6 +328,42 @@ def collectFinance(code, name=None, industry=None, today=None):
             return None
         return a - b
 
+    # ── 외화 → 원화 환산 (FnGuide 값에서 역산한 기준. 한국은행 매매기준율)
+    #   손익: 회계연도 시작일~기간말의 평균환율. 분기(3개월) 값에도 그 분기까지의 누적 평균환율을 곱한다
+    #         4분기 = 연간 환산액 − 1~3분기 환산액
+    #   현금흐름: 누적 금액 × 기간말 환율. 분기 = 누적 환산액의 차이
+    def _rate(y, q, m):
+        ey, em = period_end(y, q, fm)
+        end = dt.date(ey, em, calendar.monthrange(ey, em)[1])
+        if m in _CF_SET or m == '_기말기초차':
+            return ecosFx.end_rate(fx_cur, end)
+        sy, sm = period_end(y - 1, 4, fm)
+        start = dt.date(sy + sm // 12, sm % 12 + 1, 1)
+        return ecosFx.avg_rate(fx_cur, start, end)
+
+    def _won(v, y, q, m):
+        r = _rate(y, q, m) if v is not None else None
+        return v * r if r is not None else None
+
+    def won_quarter(y, q, m):
+        if m in _CF_SET or m == '_기말기초차':
+            a = _won(cum(y, q, m), y, q, m)
+            if q == 1:
+                return a
+            b = _won(cum(y, q - 1, m), y, q - 1, m)
+            return a - b if None not in (a, b) and quarter(y, q, m) is not None else None
+        if q < 4:
+            return _won(quarter(y, q, m), y, q, m)
+        parts = [_won(annual(y, m), y, 4, m)] + [_won(quarter(y, k, m), y, k, m) for k in (1, 2, 3)]
+        return parts[0] - sum(parts[1:]) if None not in parts else _won(quarter(y, 4, m), y, 4, m)
+
+    if fx_cur:      # 출력에 쓰는 값: 환산한 것
+        out_annual = lambda y, m: _won(annual(y, m), y, 4, m)
+        out_cum = lambda y, q, m: _won(own_cum(y, q, m), y, q, m)
+        out_quarter = won_quarter
+    else:
+        out_annual, out_cum, out_quarter = annual, own_cum, quarter
+
     def derive(get):
         """원시 계정 → FnGuide 지표 이름. get(m)은 한 기간의 원시 값."""
         d = {m: get(m) for m in _RAW + ['_기말기초차'] if m not in _STOCK}
@@ -324,6 +380,10 @@ def collectFinance(code, name=None, industry=None, today=None):
         if None not in (d['매출총이익'], d['영업이익']):
             d['_판관비_공시'], d['판관비'] = d['판관비'], d['매출총이익'] - d['영업이익']
         d['영업수익'] = d['매출액']
+        if sheet == '보험업' and None not in (d['_보험영업수익'], d['_투자영업수익']):
+            # 보험업(FnGuide 기준): 영업수익 = 보험 + 투자 (+ 기타영업수익), 영업비용 = 영업수익 − 영업이익
+            d['영업수익'] = d['_보험영업수익'] + d['_투자영업수익'] + (d['_기타영업수익'] or 0.0)
+            d['영업비용'] = None
         if d['영업비용'] is None and d['영업수익'] is not None and d['영업이익'] is not None:
             d['영업비용'] = d['영업수익'] - d['영업이익']
         if d['판관비'] is not None and d['영업이익'] is not None:
@@ -344,16 +404,17 @@ def collectFinance(code, name=None, industry=None, today=None):
         return {k: (round(v, 2) if v is not None else None) for k, v in d.items() if not k.startswith('_')}
 
     latest = max(reports, key=lambda k: period_end(*k, fm))
-    out = {'결산월': fm, '연결구분': fs_main, '업종구분': classify_industry(name, industry),
+    out = {'결산월': fm, '연결구분': fs_main, '업종구분': sheet,
            '최근보고서': _qlabel(period_end(*latest, fm)), '수집메모': ''}
     cols = {}
     # 연간: 사업보고서가 있는 해 + 그 보고서의 전기·전전기 (최신 보고서의 값이 먼저 자리를 잡는다)
     years = {}
     for (y, q), r in sorted(reports.items(), reverse=True):
         if q == 4:
-            years.setdefault(y, lambda m, y=y: annual(y, m))
-            years.setdefault(y - 1, lambda m, y=y: annual(y - 1, m))
-            years.setdefault(y - 2, lambda m, r=r: r['prev2'].get(m))
+            years.setdefault(y, lambda m, y=y: out_annual(y, m))
+            years.setdefault(y - 1, lambda m, y=y: out_annual(y - 1, m))
+            years.setdefault(y - 2, (lambda m, r=r, y=y: _won(r['prev2'].get(m), y - 2, 4, m)) if fx_cur
+                             else (lambda m, r=r: r['prev2'].get(m)))
     for y in sorted(years):
         for k, v in derive(years[y]).items():
             cols[f'{y}(연간)_{k}'] = v
@@ -361,14 +422,14 @@ def collectFinance(code, name=None, industry=None, today=None):
     for y, q in want:
         if (y, q) in reports and (q in (2, 3) or ((y, q) == latest and q < 4)):
             lab = f'{_qlabel(period_end(y, q, fm))}(누적)'
-            for k, v in derive(lambda m: own_cum(y, q, m)).items():
+            for k, v in derive(lambda m: out_cum(y, q, m)).items():
                 cols[f'{lab}_{k}'] = v
     # 분기
     for y, q in want:
         if (y, q) not in reports and (y + 1, q) not in reports:
             continue
         lab = _qlabel(period_end(y, q, fm))
-        for k, v in derive(lambda m: quarter(y, q, m)).items():
+        for k, v in derive(lambda m: out_quarter(y, q, m)).items():
             cols[f'{lab}_{k}'] = v
     missing = [_qlabel(period_end(y, q, fm)) for y, q in want
                if (y, q) not in reports and period_end(y, q, fm) < period_end(*latest, fm)]

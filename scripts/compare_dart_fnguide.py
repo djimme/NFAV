@@ -72,8 +72,10 @@ def compare(dart_path):
     stock_type = {}
     for code in codes:
         memo = str(dart.at[code, '수집메모']) if '수집메모' in dart.columns else ''
-        if '표시통화' in memo:
+        if '환산 안 함' in memo:
             stock_type[code] = '외화 표시 기업(DART는 공시 통화, FnGuide는 원화 환산)'
+        elif '표시통화' in memo:
+            stock_type[code] = '외화 표시 기업(원화 환산 후 차이: 환율 반올림·원본 금액 차이)'
         elif pd.notna(fng.at[code, '결산월']) and int(fng.at[code, '결산월']) != int(dart.at[code, '결산월']):
             stock_type[code] = '결산월 불일치(결산기 변경: FnGuide 4월 기준과 DART 현재 기준이 다름)'
         elif '혼재' in memo:
