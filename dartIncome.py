@@ -43,6 +43,9 @@ from dartFinance import API, CACHE_DIR, _amt, _key, fetch_statement, get_corp_ma
 
 Q_REPRT = {1: '11013', 2: '11012', 3: '11014', 4: '11011'}
 WINDOW_START = (2025, 1)      # 이 달 이후에 끝나는 기간을 수집한다
+QUARTER_START = (2024, 10)    # 분기(3개월) 값은 이 달 이후에 끝나는 분기부터 낸다 (2024/4Q — FnGuide 분기 열의 시작)
+                              # WINDOW_START 앞의 분기는 보고서를 받지 않고 다음 해 보고서의 전기 값으로 만든다
+                              # (2024년 보고서를 직접 받아도 FnGuide 일치 칸이 830 → 831로 거의 같았다)
 RECHECK_NODATA_DAYS = 7       # 최근 분기의 '데이터 없음' 캐시는 이 기간이 지나면 다시 조회 (나중에 공시될 수 있음)
 DEBUG = bool(os.environ.get('DART_FIN_DEBUG'))   # 정의 후보(현금A~E, 판관비2)를 함께 내보낸다 (검증용)
 
@@ -173,6 +176,8 @@ def parse_report(rows, q):
     has_other_op = any(r.get('account_id') == _OTHER_OP_ID for r in inc)
     for m, ids, names in _IS_ACCOUNTS:
         r = _pick(inc, ids, names) if (m != '_기타영업수익' or has_other_op) else None
+        if r is not None and m == '매출원가' and _norm(r.get('account_nm')) == '영업비용':
+            r = None        # 영업비용 전체를 매출원가 표준계정(CostOfSales)으로 붙인 회사: 매출원가가 아니다
         if r is None:
             continue
         if q == 4:
@@ -247,7 +252,7 @@ def _fetch_reports(corp, fm, today):
     reports = {}
     if fm == 12:
         for y, q, fs, rows in found:
-            reports[(y, q)] = dict(fs=fs, **parse_report(rows, q))
+            reports[(y, q)] = dict(fs=fs, rows=rows, **parse_report(rows, q))
         return reports, fs_main, currency
     guesses = [(_fy_end_guess(rows, q, fm), q, fs, rows) for _, q, fs, rows in found]
     # (종료 연도 − 기수)는 회사마다 일정하다. 정정공시로 접수일이 늦은 보고서가 섞여도 최솟값은 맞다
@@ -256,7 +261,7 @@ def _fetch_reports(corp, fm, today):
     for (n, e), q, fs, rows in guesses:
         end = base + n if (base is not None and n is not None) else e
         if end is not None and (end, q) not in reports:
-            reports[(end, q)] = dict(fs=fs, **parse_report(rows, q))
+            reports[(end, q)] = dict(fs=fs, rows=rows, **parse_report(rows, q))
     return reports, fs_main, currency
 
 
@@ -273,6 +278,8 @@ def collectFinance(code, name=None, industry=None, today=None):
     # 아래에서 y는 회계연도가 끝나는 해
     want = sorted(k for k in ((y, q) for y in range(WINDOW_START[0], today.year + 2) for q in (1, 2, 3, 4))
                   if WINDOW_START <= period_end(*k, fm) <= (today.year, today.month))
+    want_q = sorted(k for k in ((y, q) for y in range(QUARTER_START[0], today.year + 2) for q in (1, 2, 3, 4))
+                    if QUARTER_START <= period_end(*k, fm) <= (today.year, today.month))
     notes = []
     sheet = classify_industry(name, industry)
     fx_cur = None               # 외화로 공시한 기업: 원화로 환산할 통화
@@ -329,6 +336,8 @@ def collectFinance(code, name=None, industry=None, today=None):
         return a - b
 
     # ── 외화 → 원화 환산 (FnGuide 값에서 역산한 기준. 한국은행 매매기준율)
+    #   모든 외화 공시 기업에 같은 방식을 쓴다. FnGuide는 일부 기업(프레스티지바이오파마·코오롱티슈진·파이온엑스)의
+    #   현금흐름을 평균환율로 환산해 값이 다르지만, DART 원본 + 한 가지 방식을 기준으로 삼는다 (2026-11 결정)
     #   손익: 회계연도 시작일~기간말의 평균환율. 분기(3개월) 값에도 그 분기까지의 누적 평균환율을 곱한다
     #         4분기 = 연간 환산액 − 1~3분기 환산액
     #   현금흐름: 누적 금액 × 기간말 환율. 분기 = 누적 환산액의 차이
@@ -376,6 +385,9 @@ def collectFinance(code, name=None, industry=None, today=None):
             d['법인세비용'] = -tax          # 세전이익 − 순이익과 부호가 반대면 뒤집는다
         if d['매출총이익'] is None and None not in (d['매출액'], d['매출원가']):
             d['매출총이익'] = d['매출액'] - d['매출원가']
+        if sheet == '제조업' and d['매출총이익'] is None and d['매출원가'] is None \
+                and None not in (d['매출액'], d['영업비용']):
+            d['매출총이익'] = d['매출액']   # 매출원가 없이 영업비용만 공시: 매출총이익 = 매출액, 판관비 = 영업비용 전체
         # 판관비는 FnGuide와 같이 '매출총이익 − 영업이익'(매출총이익 아래 영업비용 전체). 계산할 수 없으면 공시된 판관비
         if None not in (d['매출총이익'], d['영업이익']):
             d['_판관비_공시'], d['판관비'] = d['판관비'], d['매출총이익'] - d['영업이익']
@@ -425,7 +437,7 @@ def collectFinance(code, name=None, industry=None, today=None):
             for k, v in derive(lambda m: out_cum(y, q, m)).items():
                 cols[f'{lab}_{k}'] = v
     # 분기
-    for y, q in want:
+    for y, q in want_q:
         if (y, q) not in reports and (y + 1, q) not in reports:
             continue
         lab = _qlabel(period_end(y, q, fm))

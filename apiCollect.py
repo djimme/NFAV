@@ -5,6 +5,8 @@
   dart_balance  - OpenDART 최신 재무상태표 + 당기순이익(누적)  → derived/dart_balance_YYYY_MM.xlsx
   dart_finance  - OpenDART 손익계산서·현금흐름표 (연간·누적·분기, 업종별 시트) → derived/dart_finance_YYYY_MM.xlsx
                   (FnGuide finance 파일과 같은 컬럼 이름. 종목당 보고서 5~7건을 조회한다)
+  dart_ratio    - DART 재무제표로 직접 계산한 재무비율·EPS·BPS·PER·PBR (FnGuide ratio·snapshot 대체, 연간) → derived/dart_ratio_YYYY_MM.xlsx
+                  (dart_finance 가 받아 둔 사업보고서 캐시를 쓴다. 먼저 dart_finance 를 실행할 것)
   krx_marketcap - KRX Open API 전 종목 시가총액·종가·상장주식수 (기본) → derived/market_cap_YYYY_MM_DD.xlsx
                   (시장별 1회 호출로 전 종목. 파일명의 날짜는 KRX 기준 거래일)
   kb_marketcap  - KB증권 종목기업개요 시가총액·PER·PBR (대체 소스, 종목별 호출) → derived/market_cap_kb_YYYY_MM_DD.xlsx
@@ -46,6 +48,12 @@ MODULE_CONFIG = {
         'row_args': True,   # 수집 함수에 종목명·업종도 넘긴다 (업종별 시트 구분)
         'sheets': True,     # 업종별 멀티시트로 저장
     },
+    'dart_ratio': {
+        'description': 'DART 재무제표로 직접 계산한 재무비율·EPS·BPS·PER·PBR (dart_finance 캐시 + 주식수·주가)',
+        'output': lambda now: f'derived/dart_ratio_{now:%Y_%m}.xlsx',
+        'workers': 3,
+        'row_args': True,
+    },
     'krx_marketcap': {
         'description': 'KRX 일별매매정보 시가총액 (유가증권·코스닥)',
         'output': None,  # KRX 기준 거래일로 파일명을 정한다
@@ -65,6 +73,9 @@ def _get_collect_fn(module):
     if module == 'dart_finance':
         from dartIncome import collectFinance
         return collectFinance
+    if module == 'dart_ratio':
+        from dartRatio import collectRatio
+        return collectRatio
     if module == 'kb_marketcap':
         from kbMarketCap import collectMarketCap
         return collectMarketCap

@@ -149,3 +149,4 @@ temp_comp/*.txt
 # API keys (파일)
 .env
 .env.local
+.kis_token_cache.json

@@ -95,6 +95,19 @@ def load_all_data(config: dict) -> dict:
         else:
             print(f"  ℹ️  {label} 파일 없음 ({config.get(cfg_key)}) → python apiCollect.py 로 수집")
 
+    # --- DART로 직접 계산한 재무비율·주당 지표 (선택) — python apiCollect.py dart_ratio ---
+    #   ratio_source 가 "dart" 이면 FnGuide snapshot·ratio·invest_idx 의 해당 값을 이 파일 값으로 바꾼다 (merge_base)
+    if config.get("ratio_source") == "dart":
+        path = _latest_file(config.get("dart_ratio_file"))
+        if path:
+            df = pd.read_excel(path, dtype={"종목코드": str})
+            df["종목코드"] = df["종목코드"].str.zfill(6)
+            data["dart_ratio"] = df
+            data["dart_price_basis"] = config.get("dart_price_basis", "current")
+            print(f"  ✅ DART 재무비율·주당 지표: {path} ({len(df)}개 종목, 주가 기준: {data['dart_price_basis']})")
+        else:
+            print(f"  ⚠️ DART 재무비율 파일 없음 ({config.get('dart_ratio_file')}) → FnGuide 값을 그대로 쓴다")
+
     return data
 
 
@@ -162,7 +175,68 @@ def merge_base(data: dict) -> pd.DataFrame:
         cols = [c for c in MARKET_CAP_COLS if c in mc.columns]
         base = base.merge(mc[["종목코드"] + cols], on="종목코드", how="left")
 
+    # DART 재무비율·주당 지표 (ratio_source = "dart" 일 때만)
+    if "dart_ratio" in data:
+        base = apply_dart_ratio(base, data["dart_ratio"], data.get("dart_price_basis", "current"))
+
     return base
+
+
+# FnGuide 값 대신 DART 계산 값을 쓰는 지표 (컬럼 이름은 '{연도}{접미어}')
+DART_RATIO_SUFFIXES = ("_EPS(원)", "_BPS(원)", "_PER(배)", "_PBR(배)", "(누적)_부채비율", "(누적)_유동비율",
+                       "(누적)_영업이익률", "(누적)_ROA", "(누적)_ROE", "(누적)_총자산회전율", "(누적)_매출증가율",
+                       "(누적)_EPS증가율", "(누적)_ROIC", "_EV/EBITDA", "_EV/EBIT")
+_YEAR_COL = re.compile(r"^(\d{4})(?=[_(])")
+
+
+def apply_dart_ratio(base: pd.DataFrame, dart: pd.DataFrame, price_basis: str = "current") -> pd.DataFrame:
+    """
+    base 의 FnGuide 재무비율·주당 지표 열을 DART 계산 값(dart_ratio 파일)으로 바꾼다.
+
+    - FnGuide 쪽의 같은 지표 열은 연도와 관계없이 모두 뺀다 (2026·2027년 열은 증권사 추정치).
+    - 종목마다 최근 사업연도가 다르다(3·6월 결산사는 2026, 12월 결산사는 2025). 전략은 '가장 최근 연도 열
+      하나'를 전 종목에 쓰므로, 각 종목의 최근 사업연도 값을 기준연도(가장 많은 종목의 최근 사업연도) 열에
+      맞춰 넣는다. 한 해 전 값은 기준연도 − 1 열에 들어간다. 실제 사업연도는 'DART_기준사업연도' 열에 적는다.
+    - price_basis = "current": 기준연도의 PER·PBR·EV/EBITDA·EV/EBIT 는 최근 거래일 종가 기준 값을 쓴다.
+      "fiscal_year_end": 결산월 말 종가 기준 값을 그대로 쓴다 (FnGuide 표와 같은 방식, 검증용).
+    """
+    def is_metric(c):
+        return bool(_YEAR_COL.match(c)) and c.endswith(DART_RATIO_SUFFIXES)
+
+    out = base.drop(columns=[c for c in base.columns if is_metric(c)] +
+                    [c for c in ("발행주식수(천주)",) if c in base.columns])
+    d = dart.set_index("종목코드")
+    years = sorted({int(_YEAR_COL.match(c).group(1)) for c in d.columns if is_metric(c)})
+    # 종목별 최근 사업연도: 재무비율이나 EPS가 하나라도 있는 가장 최근 연도
+    latest = pd.Series(np.nan, index=d.index)
+    for y in sorted(years, reverse=True):
+        cols = [c for c in (f"{y}(누적)_부채비율", f"{y}_EPS(원)") if c in d.columns]
+        has = d[cols].notna().any(axis=1) if cols else pd.Series(False, index=d.index)
+        latest[latest.isna() & has] = y
+    if latest.notna().sum() == 0:
+        return base
+    ref = int(latest.mode().iloc[0])
+    aligned = pd.DataFrame(index=d.index)
+    for k in range(len(years)):
+        for sfx in DART_RATIO_SUFFIXES:
+            col = pd.Series(np.nan, index=d.index)
+            for ly in latest.dropna().unique():
+                src = f"{int(ly) - k}{sfx}"
+                if src in d.columns:
+                    m = latest == ly
+                    col[m] = pd.to_numeric(d.loc[m, src], errors="coerce")
+            if col.notna().any():
+                aligned[f"{ref - k}{sfx}"] = col
+    if price_basis == "current":
+        for sfx, src in (("_PER(배)", "현재가_PER(배)"), ("_PBR(배)", "현재가_PBR(배)"),
+                         ("_EV/EBITDA", "현재가_EV/EBITDA"), ("_EV/EBIT", "현재가_EV/EBIT")):
+            if src in d.columns:
+                aligned[f"{ref}{sfx}"] = pd.to_numeric(d[src], errors="coerce")
+    aligned["DART_기준사업연도"] = latest.astype("Int64")
+    for c in ("발행주식수(천주)", "현재가_기준일"):
+        if c in d.columns:
+            aligned[c] = d[c]
+    return out.merge(aligned.reset_index(), on="종목코드", how="left")
 
 
 # =============================================================================

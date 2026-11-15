@@ -33,12 +33,13 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
     result = df.copy()
 
-    ev_col   = _best_col(result, _recent_cols(result, "_EV/EBITDA"))
+    ev_metric = cfg.get("ev_metric", "EV/EBITDA")       # "EV/EBITDA" 또는 "EV/EBIT"
+    ev_col   = _best_col(result, _recent_cols(result, "_" + ev_metric))
     roic_col = _best_col(result, _recent_cols(result, "(누적)_ROIC"))
     debt_col = _best_col(result, _recent_cols(result, "(누적)_부채비율"))
 
     if not ev_col or not roic_col:
-        print("  ⚠️ Greenblatt 전략: 필요 컬럼 없음 (EV/EBITDA 또는 ROIC)")
+        print(f"  ⚠️ Greenblatt 전략: 필요 컬럼 없음 ({ev_metric} 또는 ROIC)")
         return pd.DataFrame()
 
     result["EV_EBITDA_사용"] = pd.to_numeric(result[ev_col], errors="coerce")
@@ -83,7 +84,7 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         output_cols.insert(5, "부채비율_사용")
     output_cols = [c for c in output_cols if c in result.columns]
 
-    print(f"  📊 Greenblatt 전략: {len(result)}개 종목 선정")
+    print(f"  📊 Greenblatt 전략: {len(result)}개 종목 선정 ({ev_metric} 기준)")
     return result[output_cols].rename(columns={
         "ROIC_사용": "ROIC(%)",
         "부채비율_사용": "부채비율(%)",

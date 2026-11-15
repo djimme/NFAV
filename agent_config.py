@@ -40,6 +40,14 @@ DATA_CONFIG = {
     "ratio_file": "derived/finance_ratio_2*.xlsx",
     "invest_idx_file": "derived/invest_idx_2*.xlsx",
 
+    # 재무비율·주당 지표(EPS·BPS·PER·PBR·ROIC·EV/EBITDA 등)의 출처 — 환경변수(또는 .env) NFAV_RATIO_SOURCE
+    #   "dart"   : DART·KRX로 직접 계산한 값 (기본값. python apiCollect.py dart_ratio → derived/dart_ratio_*.xlsx)
+    #   "fnguide": FnGuide 4월 파일 값 그대로 (2026-04 이후 갱신되지 않는다 — 비교·검증용)
+    "ratio_source": get_env("NFAV_RATIO_SOURCE", "dart"),
+    "dart_ratio_file": "derived/dart_ratio_2*.xlsx",
+    #   "current": 최근 사업연도의 PER·PBR·EV 배수를 최근 거래일 종가로 계산 / "fiscal_year_end": 결산월 말 종가(검증용)
+    "dart_price_basis": get_env("NFAV_DART_PRICE_BASIS", "current"),
+
     # 공식 API 원천 데이터 (python apiCollect.py dart_balance / krx_marketcap) — 가장 최근 파일 사용
     #   시가총액 대체 소스: kb_marketcap → derived/market_cap_kb_*.xlsx (필요 시 아래 경로를 바꿔 사용)
     "dart_balance_file": "derived/dart_balance_*.xlsx",
@@ -66,10 +74,17 @@ STRATEGY_CONFIG = {
     },
 
     # --- Greenblatt Magic Formula ---
+    #   2026-11: 종목 선정에서 일단 제외한다(enabled = False). DART 값으로 바꾸면 EV/EBITDA에 필요한 감가상각비가
+    #   일반 기업의 55%에만 있고(현금흐름표 20% + XBRL 주석 35%), 시가총액 500억 미만은 27%뿐이라 소형주가
+    #   후보에서 빠지기 때문이다. 다시 쓰려면 True 로 바꾸고, 필요하면 ev_metric 을 "EV/EBIT" 로 둔다.
     "greenblatt": {
-        "enabled": True,
+        "enabled": False,
         "top_n": 30,              # 상위 N개 종목 선정
         "max_debt_ratio": 150.0,  # 부채비율 최대값
+        # 수익수익률에 쓰는 배수: "EV/EBITDA"(기본) 또는 "EV/EBIT"
+        #   DART 값을 쓸 때(ratio_source = "dart") EV/EBITDA는 감가상각비가 확인되는 약 55% 종목에만 있다.
+        #   EV/EBIT는 영업이익만 쓰므로 대부분 종목에 있고, Greenblatt의 원래 정의(EBIT ÷ EV)이기도 하다.
+        "ev_metric": get_env("NFAV_GREENBLATT_EV", "EV/EBITDA"),
     },
 
     # --- 멀티팩터 스코어링 ---
