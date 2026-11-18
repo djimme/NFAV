@@ -150,3 +150,7 @@ temp_comp/*.txt
 .env
 .env.local
 .kis_token_cache.json
+
+# 로컬 전용 폴더 (추적 제외)
+docs/
+scripts/
