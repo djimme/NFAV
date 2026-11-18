@@ -1,5 +1,5 @@
 """
-DART 재무제표로 재무비율·주당 지표를 직접 계산한다 (2층 파생 지표 — FnGuide ratio·snapshot 대체, 4단계)
+DART 재무제표로 재무비율·주당 지표를 직접 계산한다 (2층 파생 지표)
 
 원천
   - 사업보고서 재무제표: dartIncome 이 받아 둔 fnlttSinglAcntAll 캐시 + 한 해 전 사업보고서
@@ -7,9 +7,10 @@ DART 재무제표로 재무비율·주당 지표를 직접 계산한다 (2층 �
   - 감가상각비: 사업보고서 XBRL 원본(fnlttXbrl) — 현금흐름표에 없는 종목만, 종목마다 1회 호출
   - 주가: KRX 일별매매정보 (결산월 마지막 거래일 종가, 최근 거래일 종가) — derived/krx_cache
 사업보고서 1건에 당기·전기·전전기 값이 있으므로, 최신 보고서의 값을 먼저 쓴다(재작성 반영).
-최근 4개 회계연도를 내기 위해 한 해 전 사업보고서 1건을 더 받는다(종목마다 1회 호출, 캐시).
+한 해 전 사업보고서는 최근 4개 회계연도를 내기 위해 더 받는 것이다(종목마다 1회 호출, 캐시).
 
-계산 지표와 정의 (FnGuide 이용안내 기준, 컬럼 이름도 FnGuide ratio·snapshot 파일과 같다):
+계산 지표와 정의 (정의는 FnGuide 이용안내를 따랐다. 이름은 이 파일 기준 — FnGuide 수집 파일은
+매출증가율을 '매출액증가율'로 쓴다. 대응: scripts/compare_dart_ratio.py):
   {Y}(누적)_부채비율      부채총계 ÷ 자본총계 × 100
   {Y}(누적)_유동비율      유동자산 ÷ 유동부채 × 100
   {Y}(누적)_영업이익률    영업이익 ÷ 매출액 × 100          (영업이익은 회사 공시 값)
@@ -263,10 +264,7 @@ def _fx(cur, y, fm):
 
 
 def _add_older_annual(corp, fm, reports, fs_main):
-    """가장 최근 사업보고서의 한 해 전 사업보고서를 더한다 (당기·전기·전전기 → 4개 연도 값을 얻기 위해).
-
-    dartIncome 은 최근 1~2년 보고서만 받으므로 여기서 1건을 더 받는다(캐시됨). 연결구분이 같은 것만 쓴다.
-    """
+    """가장 최근 사업보고서의 한 해 전 사업보고서를 더한다 (4개 연도 값을 얻기 위해). 연결구분이 같은 것만 쓴다."""
     ys = [y for (y, q) in reports if q == 4]
     if not ys or max(ys) - 1 in ys or not fs_main:
         return
@@ -330,7 +328,7 @@ def collectRatio(code, name=None, industry=None, today=None):
             notes.append(f'주당 지표 계산 안 함(환율 없음: {e})')
             shares = {}
     eps_by_year, last, ev_now = {}, None, None
-    non_fin = out['업종구분'] == '제조업'       # ROIC·EV는 금융업에는 계산하지 않는다 (FnGuide도 같다)
+    non_fin = out['업종구분'] == '제조업'       # ROIC·EV는 금융업에는 계산하지 않는다
     day_now, closes_now = latest_close()
     price_now, listed_now = closes_now.get(code, (None, None))
     for y in sorted(vals):

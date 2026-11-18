@@ -144,7 +144,7 @@ def merge_base(data: dict) -> pd.DataFrame:
     # ratio: 핵심 컬럼만 선택
     rat = data["ratio"]
     keep_keywords = ["부채비율", "유동비율", "ROA", "ROE", "ROIC",
-                     "EPS증가율", "영업이익률", "총자산회전율", "매출증가율"]
+                     "EPS증가율", "영업이익률", "총자산회전율", "매출액증가율"]
     rat_cols = ["종목코드"] + [c for c in rat.columns
                                if any(k in c for k in keep_keywords)]
     rat_cols = list(dict.fromkeys(rat_cols))
@@ -155,7 +155,7 @@ def merge_base(data: dict) -> pd.DataFrame:
     inv_keep = ["종목코드", "팩터_업종명",
                 "베타_종목", "배당성_종목", "수익건전성_종목",
                 "성장성_종목", "기업투자_종목", "모멘텀_종목",
-                "밸류_종목", "변동성_종목", "단기 Reversal_종목"]
+                "밸류_종목", "변동성_종목", "단기 Return_종목"]
     # EV/EBITDA 컬럼 추가
     ev_cols = [c for c in inv.columns if "EV/EBITDA" in c]
     inv_keep += ev_cols
@@ -203,7 +203,9 @@ def apply_dart_ratio(base: pd.DataFrame, dart: pd.DataFrame, price_basis: str = 
     def is_metric(c):
         return bool(_YEAR_COL.match(c)) and c.endswith(DART_RATIO_SUFFIXES)
 
-    out = base.drop(columns=[c for c in base.columns if is_metric(c)] +
+    # FnGuide 는 매출 증가율을 '매출액증가율'로 준다 (DART 파일의 '매출증가율'과 같은 지표라 함께 뺀다)
+    out = base.drop(columns=[c for c in base.columns if is_metric(c) or
+                             (_YEAR_COL.match(c) and c.endswith("(누적)_매출액증가율"))] +
                     [c for c in ("발행주식수(천주)",) if c in base.columns])
     d = dart.set_index("종목코드")
     years = sorted({int(_YEAR_COL.match(c).group(1)) for c in d.columns if is_metric(c)})

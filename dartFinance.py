@@ -1,8 +1,7 @@
 """
 OpenDART 재무제표 수집 및 파싱 (1층 원천 데이터)
 
-FnGuide 모듈(fnguideFinance.py 등)과 같은 구조: 종목 단위 collect 함수가 dict를 반환하고,
-전 종목 수집과 Excel 저장은 dartCollect.py가 맡는다.
+종목 단위 collect 함수가 dict를 반환하고, 전 종목 수집과 Excel 저장은 apiCollect.py가 맡는다.
 
 수집 데이터 (재무상태표 + 당기순이익, 최신 공시 기준):
   유동자산, 부채총계, 자본총계, 비지배지분

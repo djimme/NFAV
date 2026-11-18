@@ -5,6 +5,9 @@ DART finance 파일(apiCollect.py dart_finance)과 FnGuide finance 파일을 칸
   python scripts/compare_dart_fnguide.py                       # 최신 dart_finance_*.xlsx vs finance_2026_04_v2.xlsx
   python scripts/compare_dart_fnguide.py derived/dart_finance_2026_11_test.xlsx   # 샘플(test) 파일
   → derived/dart_finance_compare_YYYY_MM[_test].xlsx
+  python scripts/compare_dart_fnguide.py derived/dart_finance_2026_11.xlsx derived/finance_2026_11.xlsx
+                                                               # FnGuide 파일을 직접 지정 (개편 후 11월 파일 등)
+  → derived/dart_finance_compare_YYYY_MM_vs_finance_2026_11.xlsx   (기본 파일이 아니면 이름에 FnGuide 파일을 붙인다)
 
 일치 기준: 두 값의 차이가 1억원 이하 (FnGuide는 억원 단위 반올림 값).
 시트: 요약 / 지표별 / 기간별 / 불일치유형 / 종목별 / 불일치상세 / 수집실패 / 업종구분차이
@@ -23,6 +26,12 @@ from fin_utils import save_styled_excel_multisheet
 
 FNG_FILE = 'derived/finance_2026_04_v2.xlsx'
 TOL = 1.0
+# 개편 후 FnGuide(2026-11~) 항목 이름 → DART 파일(=개편 전 FnGuide) 컬럼 이름.
+# 11월 FnGuide 파일은 새 사이트 이름 그대로 저장되므로, 비교할 때만 이 대응으로 맞춘다.
+FNG_NEW_NAMES = {
+    '법인세비용차감전계속사업이익': '세전계속사업이익',
+    '순영업이익': '순영업수익',
+}
 COL_RE = re.compile(r'^(\d{4})(?:/(\d)Q)?(\((?:연간|누적)\))?_(.+)$')
 
 
@@ -31,6 +40,24 @@ def _load(path):
     df = pd.concat([v.assign(시트=k) for k, v in sheets.items()], ignore_index=True)
     df['종목코드'] = df['종목코드'].str.zfill(6)
     return df.drop_duplicates('종목코드').set_index('종목코드')
+
+
+def _load_fng(path):
+    """FnGuide finance 파일을 읽고, 개편 후 이름을 DART 쪽 이름으로 바꾼다. → (df, 바꾼 이름 목록)"""
+    df = _load(path)
+    renamed, mapping = set(), {}
+    for col in df.columns:
+        period, _, metric = col.rpartition('_')
+        if period and metric in FNG_NEW_NAMES and COL_RE.match(col):
+            mapping[col] = f'{period}_{FNG_NEW_NAMES[metric]}'
+            renamed.add(metric)
+    # 한 파일에 기존 이름과 새 이름이 함께 있으면(예전 캐시가 섞인 경우) 기존 이름 열의 빈칸만 채운다
+    for new, old in mapping.items():
+        if old in df.columns:
+            df[old] = df[old].where(df[old].notna(), df[new])
+            df = df.drop(columns=new)
+    df = df.rename(columns=mapping)
+    return df, sorted(renamed)
 
 
 def _kind(col):
@@ -61,8 +88,10 @@ def _mismatch_type(metric, kind, a, b, sheet):
     return '누적 값 차이'
 
 
-def compare(dart_path):
-    dart, fng = _load(dart_path), _load(FNG_FILE)
+def compare(dart_path, fng_path=None):
+    fng_path = fng_path or FNG_FILE
+    dart = _load(dart_path)
+    fng, renamed = _load_fng(fng_path)
     is_test = dart_path.endswith('_test.xlsx')
     codes = [c for c in dart.index if c in fng.index]
     dcols = [c for c in dart.columns if COL_RE.match(c)]
@@ -134,7 +163,8 @@ def compare(dart_path):
     fails = pd.DataFrame(fails, columns=['종목코드', '종목명', '업종', '이유', 'FnGuide 4월 파일에 있음'])
 
     summary = pd.DataFrame([
-        ('DART 파일', dart_path), ('FnGuide 파일', FNG_FILE), ('일치 기준', f'차이 {TOL}억원 이하'),
+        ('DART 파일', dart_path), ('FnGuide 파일', fng_path), ('일치 기준', f'차이 {TOL}억원 이하'),
+        ('FnGuide 새 이름 → 비교에 쓴 이름', ', '.join(f'{n} → {FNG_NEW_NAMES[n]}' for n in renamed) or '(없음)'),
         ('DART 수집 종목 수', len(dart)), ('FnGuide 종목 수', len(fng)), ('양쪽 모두 있는 종목 수', len(codes)),
         ('종목 리스트 대비 수집하지 못한 종목 수', len(fails)),
         ('FnGuide에 값이 있는 칸', len(r)), ('그중 DART에도 값이 있는 칸(비교 칸)', len(both)),
@@ -163,6 +193,8 @@ def compare(dart_path):
               ('DART값없음', nodart), ('불일치상세', mm.sort_values(['종목코드', '지표', '기간']).head(200000)),
               ('수집실패', fails), ('업종구분차이', cls)]
     out = os.path.basename(dart_path).replace('dart_finance_', 'dart_finance_compare_')
+    if os.path.normpath(fng_path) != os.path.normpath(FNG_FILE):      # 기본(4월) 비교 결과를 덮어쓰지 않는다
+        out = out.replace('.xlsx', f'_vs_{os.path.splitext(os.path.basename(fng_path))[0]}.xlsx')
     out = os.path.join('derived', out)
     save_styled_excel_multisheet([(n, d if len(d) else pd.DataFrame({'(없음)': []})) for n, d in sheets], out)
     return out, dict(sheets)
@@ -173,7 +205,7 @@ if __name__ == '__main__':
         path = sys.argv[1]
     else:
         path = sorted(f for f in glob.glob('derived/dart_finance_2*.xlsx') if not f.endswith('_test.xlsx'))[-1]
-    out, s = compare(path)
+    out, s = compare(path, sys.argv[2] if len(sys.argv) > 2 else None)
     pd.set_option('display.width', 250); pd.set_option('display.max_rows', 200); pd.set_option('display.max_colwidth', 60)
     for name in ('요약', '지표별', '기간별', '불일치유형'):
         print(f'\n== {name}'); print(s[name].to_string(index=False))

@@ -1,11 +1,16 @@
 """
-FnGuide Finance 페이지 (SVD_Finance.asp) 데이터 수집 및 파싱
+FnGuide Finance 페이지 데이터 수집 및 파싱
+
+2026년 사이트 개편 후 주소: https://wcomp.fnguide.com/CompanyInfo/Finance?c_id=AA&menu_type=01&cmp_cd={종목코드}
+표는 빈 틀이고 값은 페이지 안의 스크립트 데이터(finIncome, finCashFlow — 연간)에 들어 있다.
+분기 값은 /CompanyInfo/getFinIncome·getFinCashFlow?freq_typ=Q 로 따로 받는다.
 
 수집 데이터:
 - 손익계산서 (연간 최근 3년 / 분기 최근 4분기)
-  비금융:    매출액, 매출원가, 매출총이익, 판관비, 영업이익, 세전계속사업이익, 법인세비용, 당기순이익
-  은행/금융: 순영업수익, 판관비, 영업이익, 세전계속사업이익, 법인세비용, 당기순이익
-  보험/창투: 영업수익, 영업비용, 영업이익, 세전계속사업이익, 법인세비용, 당기순이익
+  (항목 이름은 FnGuide 사이트 이름 그대로. DART 파일의 세전계속사업이익·순영업수익과 이름이 다르다)
+  비금융:    매출액, 매출원가, 매출총이익, 판관비, 영업이익, 법인세비용차감전계속사업이익, 법인세비용, 당기순이익
+  은행/증권: 순영업이익, 판관비, 영업이익, 법인세비용차감전계속사업이익, 법인세비용, 당기순이익
+  보험:      영업수익, 영업비용, 영업이익, 법인세비용차감전계속사업이익, 법인세비용, 당기순이익
 - 현금흐름표 (연간 최근 3년 / 분기 최근 4분기) — 업종 무관 동일 구조
   영업활동현금흐름, 투자활동현금흐름, 재무활동현금흐름, 현금성자산증가
 
@@ -29,21 +34,23 @@ import re
 
 from bs4 import BeautifulSoup
 
-from fin_utils import fetch_fnguide_page, parse_company_name, parse_kse_fics
+from fin_utils import (fetch_fnguide_page, parse_company_name, parse_kse_fics, parse_fnguide_inline,
+                       fetch_fnguide_json, append_fnguide_extra, fnguide_cache_path, fnguide_consol_typ,
+                       fnguide_num)
 
 
-# ── 손익계산서 수집 항목 (row prefix → 컬럼명)
+# ── 손익계산서 수집 항목 (FnGuide 항목 이름 → 컬럼명)
 # 업종별로 존재하는 행만 실제 수집됨 (없는 항목은 자동 스킵)
 _SONIK_TARGETS = [
     ('매출액',           '매출액'),
     ('매출원가',         '매출원가'),
     ('매출총이익',       '매출총이익'),
-    ('순영업수익',       '순영업수익'),     # 은행/금융지주
-    ('영업수익',         '영업수익'),       # 보험/창투사
-    ('영업비용',         '영업비용'),       # 보험/창투사
+    ('순영업이익',       '순영업이익'),     # 은행/금융지주·증권
+    ('영업수익',         '영업수익'),       # 보험
+    ('영업비용',         '영업비용'),       # 보험
     ('판매비와관리비',   '판관비'),
     ('영업이익',         '영업이익'),
-    ('세전계속사업이익', '세전계속사업이익'),
+    ('법인세비용차감전계속사업이익', '법인세비용차감전계속사업이익'),
     ('법인세비용',       '법인세비용'),
     ('당기순이익',       '당기순이익'),
 ]
@@ -57,9 +64,23 @@ _CASH_TARGETS = [
 ]
 
 
+_CACHE_PREFIX = 'fnguide_finance_'
+
+
 def getFnguideFinance(code):
-    """FnGuide Finance HTML 가져오기 (캐싱)"""
-    return fetch_fnguide_page(code, 'SVD_Finance.asp', '103', 'fnguide_finance_')
+    """FnGuide Finance HTML 가져오기 (캐싱)
+
+    페이지에는 연간 데이터만 들어 있다. 분기 손익·현금흐름은 JSON 주소로 따로 받아
+    같은 캐시 파일 끝에 붙여 둔다(finIncomeQ, finCashFlowQ) — 종목당 요청 3번.
+    """
+    html = fetch_fnguide_page(code, 'SVD_Finance.asp', '103', _CACHE_PREFIX)
+    if parse_fnguide_inline(html, 'finIncome') is not None and 'finIncomeQ :' not in html:
+        consol = fnguide_consol_typ(html)
+        html = append_fnguide_extra(html, fnguide_cache_path(code, _CACHE_PREFIX), {
+            'finIncomeQ': fetch_fnguide_json('getFinIncome', cmp_cd=code, freq_typ='Q', consol_typ=consol),
+            'finCashFlowQ': fetch_fnguide_json('getFinCashFlow', cmp_cd=code, freq_typ='Q', consol_typ=consol),
+        })
+    return html
 
 
 def parseFnguideFinance(html):
@@ -73,8 +94,8 @@ def parseFnguideFinance(html):
         html: FnGuide Finance HTML 문자열
 
     Returns:
-        dict: 종목명, 마켓분야, FICS분야, 결산월, 연결여부, 연도별/분기별 손익/현금흐름 데이터
-        None: 손익계산서 연간 테이블(#divSonikY)이 없는 경우
+        dict: 종목명, 마켓분야, WI26분야, 결산월, 연결여부, 연도별/분기별 손익/현금흐름 데이터
+        None: 손익계산서 데이터(finIncome)가 없는 경우
     """
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -83,28 +104,11 @@ def parseFnguideFinance(html):
 
     kse_sector, fics_sector, fiscal_month = parse_kse_fics(soup)
     data['마켓분야'] = kse_sector
-    data['FICS분야'] = fics_sector
+    data['WI26분야'] = fics_sector
     if fiscal_month is not None:
         data['결산월'] = fiscal_month
 
-    # 연결/개별 여부 (손익 연간 첫 번째 헤더 기준)
-    sonik_y_el = soup.select_one('#divSonikY')
-    if sonik_y_el is None:
-        return None
-    first_th = sonik_y_el.select_one('thead th')
-    data['연결여부'] = first_th.get_text(strip=True) if first_th else ''
-
-    # 손익계산서: 지표명별 연간 → 분기 순서로 추가
-    sonik_y = _process_table(soup, '#divSonikY', _SONIK_TARGETS, annual=True, fiscal_month=fiscal_month)
-    sonik_q = _process_table(soup, '#divSonikQ', _SONIK_TARGETS, annual=False)
-    _merge_by_metric(data, sonik_y, sonik_q, _SONIK_TARGETS)
-
-    # 현금흐름표: 지표명별 연간 → 분기 순서로 추가
-    cash_y = _process_table(soup, '#divCashY', _CASH_TARGETS, annual=True, fiscal_month=fiscal_month)
-    cash_q = _process_table(soup, '#divCashQ', _CASH_TARGETS, annual=False)
-    _merge_by_metric(data, cash_y, cash_q, _CASH_TARGETS)
-
-    return data
+    return _parse_json_finance(html, data, fiscal_month)
 
 
 def collectFinance(code):
@@ -115,21 +119,62 @@ def collectFinance(code):
         code: 종목코드 (6자리 문자열, 예: '005930')
 
     Returns:
-        dict: 종목명, 마켓분야, FICS분야, 결산월, 연결여부, 연도별/분기별 손익/현금흐름 데이터
-        None: 손익계산서 연간 테이블(#divSonikY)이 없는 경우
+        dict: 종목명, 마켓분야, WI26분야, 결산월, 연결여부, 연도별/분기별 손익/현금흐름 데이터
+        None: 손익계산서 데이터(finIncome)가 없는 경우
     """
     return parseFnguideFinance(getFnguideFinance(code))
 
 
 # --- Private parse helpers ---
 
-def _parse_date_columns(headers):
-    """헤더 th 목록에서 날짜 컬럼의 (인덱스, 텍스트) 목록 반환 (전년동기 제외)"""
-    result = []
-    for i, th in enumerate(headers):
-        text = th.get_text(strip=True)
-        if re.match(r'\d{4}/\d{2}', text):
-            result.append((i, text))
+def _parse_json_finance(html, data, fiscal_month):
+    """페이지의 finIncome / finCashFlow (+ 분기 finIncomeQ / finCashFlowQ) 에서 값을 꺼낸다.
+
+    연간 header: 최근 3개 회계연도 + '(최근분기)' 누적 + '(전년동기)' + '전년동기대비(%)'
+    분기 header: 최근 4개 분기 (+ 손익은 전년동기 열)
+    """
+    income_y = parse_fnguide_inline(html, 'finIncome')
+    if not income_y or not income_y.get('data'):
+        return None
+    data['연결여부'] = 'IFRS(연결)' if fnguide_consol_typ(html) == 'C' else 'IFRS(별도)'
+
+    def table(name, targets, annual):
+        return _process_json(parse_fnguide_inline(html, name), targets, annual, fiscal_month)
+
+    _merge_by_metric(data, table('finIncome', _SONIK_TARGETS, True),
+                     table('finIncomeQ', _SONIK_TARGETS, False), _SONIK_TARGETS)
+    _merge_by_metric(data, table('finCashFlow', _CASH_TARGETS, True),
+                     table('finCashFlowQ', _CASH_TARGETS, False), _CASH_TARGETS)
+    return data
+
+
+def _process_json(dataset, targets, annual, fiscal_month=None):
+    """{header, data} 에서 targets 행을 꺼내 {col_name: {key: value}} 로 반환"""
+    result = {}
+    if not dataset:
+        return result
+    cds, date_cols = [], []
+    for h in dataset.get('header') or []:
+        ym = h.get('YYMM') or ''
+        if re.match(r'\d{4}/\d{2}', ym) and '전년동기' not in ym:
+            date_cols.append((len(cds), ym[:7]))
+            cds.append(h['CD'])
+    if annual:
+        labeled = _annual_columns(date_cols, fiscal_month)
+    else:
+        labeled = [(i, p, _to_quarter_label(p)) for i, p in date_cols[-4:]]
+
+    rows = [((r.get('NAME') or '').replace('\xa0', '').strip(), r) for r in dataset.get('data') or []]
+    for prefix, col_name in targets:
+        # 정확히 같은 이름을 먼저 찾는다 ('법인세비용' 이 '법인세비용차감전계속사업이익' 에 걸리지 않게)
+        row = next((r for n, r in rows if n == prefix), None)
+        if row is None:
+            row = next((r for n, r in rows if n.startswith(prefix)), None)
+        if row is None:
+            continue
+        entries = {f'{label}_{col_name}': fnguide_num(row.get(cds[i])) for i, _, label in labeled}
+        if entries:
+            result[col_name] = entries
     return result
 
 
@@ -138,28 +183,6 @@ def _to_quarter_label(period):
     year, mm = period.split('/')
     quarter = (int(mm) - 1) // 3 + 1
     return f'{year}/{quarter}Q'
-
-
-def _find_row(rows, prefix):
-    """tbody tr 목록에서 div 텍스트가 prefix로 시작하는 행 반환"""
-    for tr in rows:
-        div = tr.select_one('div')
-        if div is None:
-            continue
-        name = div.get_text(strip=True).replace('\xa0', '')
-        if name == prefix or name.startswith(prefix):
-            return tr
-    return None
-
-
-def _parse_number(text):
-    """문자열을 숫자로 변환 (실패 시 None)"""
-    if text in ('\xa0', '', '-', 'N/A'):
-        return None
-    try:
-        return float(text.replace(',', ''))
-    except (ValueError, AttributeError):
-        return None
 
 
 def _annual_columns(date_cols, fiscal_month):
@@ -178,39 +201,6 @@ def _annual_columns(date_cols, fiscal_month):
         i, p = part[-1]
         out.append((i, p, f'{_to_quarter_label(p)}(누적)'))
     return out
-
-
-def _process_table(soup, section_id, targets, annual, fiscal_month=None):
-    """테이블에서 targets에 해당하는 행 데이터를 추출해 {col_name: {key: value}} dict로 반환"""
-    result = {}
-    el = soup.select_one(section_id)
-    if el is None:
-        return result
-
-    headers = el.select('thead th')
-    date_cols = _parse_date_columns(headers)
-
-    if annual:
-        labeled = _annual_columns(date_cols, fiscal_month)  # 완전 회계연도 3개 + 부분연도 누적 1개
-    else:
-        labeled = [(i, p, _to_quarter_label(p)) for i, p in date_cols[-4:]]  # 최근 4분기
-
-    body_rows = el.select('tbody tr')
-
-    for prefix, col_name in targets:
-        tr = _find_row(body_rows, prefix)
-        if tr is None:
-            continue
-        cells = tr.select('th, td')
-        col_entries = {}
-        for col_idx, period, period_label in labeled:
-            if col_idx >= len(cells):
-                continue
-            raw = cells[col_idx].get_text(strip=True)
-            col_entries[f'{period_label}_{col_name}'] = _parse_number(raw)
-        if col_entries:
-            result[col_name] = col_entries
-    return result
 
 
 def _merge_by_metric(result, annual_dict, quarterly_dict, targets):

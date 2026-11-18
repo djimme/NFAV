@@ -1,23 +1,24 @@
 """
 OpenDART 손익계산서·현금흐름표 수집 및 파싱 (1층 원천 데이터)
 
-FnGuide finance 파일(fnguideFinance.py → derived/finance_YYYY_MM.xlsx)과 같은 컬럼 이름으로
-DART 전체 재무제표(fnlttSinglAcntAll)에서 손익·현금흐름을 만든다. 호출·캐시·오류 처리는
-dartFinance.fetch_statement 를 그대로 쓴다(오류 응답은 예외, derived/dart_cache 캐시).
+DART 전체 재무제표(fnlttSinglAcntAll)에서 손익·현금흐름을 만든다.
+호출·캐시·오류 처리는 dartFinance.fetch_statement 를 쓴다.
+지표 이름은 이 파일 기준이다. FnGuide 수집 파일과는 두 항목의 이름이 다르다
+(세전계속사업이익 ↔ 법인세비용차감전계속사업이익, 순영업수익 ↔ 순영업이익 — 대응: scripts/compare_dart_fnguide.py).
 
 수집 항목 (억원):
   손익   : 매출액, 매출원가, 매출총이익, 판관비, 영업수익, 영업비용, 순영업수익, 영업이익,
            세전계속사업이익, 법인세비용, 당기순이익
   현금흐름: 영업활동현금흐름, 투자활동현금흐름, 재무활동현금흐름, 현금성자산증가
 
-컬럼 형식 (fnguideFinance.py 와 동일):
+컬럼 형식:
   연간 : {YYYY}(연간)_{지표}        회계연도가 끝난 해 기준. 결산월에 끝나는 완전 회계연도
   누적 : {YYYY/NQ}(누적)_{지표}     부분연도(연초~해당 분기) 누적. 반기·3분기와 가장 최근 분기
   분기 : {YYYY/NQ}_{지표}           3개월 값. 달력 분기 기준 (기간말 월로 계산)
 
 값을 고르는 규칙:
   - 연결(CFS) 우선, 없으면 별도(OFS). 가장 최근 보고서에서 정한 구분을 과거 보고서에도 먼저 적용한다.
-  - 연간 값은 '다음 해 보고서의 전기 값'이 있으면 그것을 쓴다(재작성 반영, FnGuide와 같은 기준).
+  - 연간 값은 '다음 해 보고서의 전기 값'이 있으면 그것을 쓴다(재작성 반영).
     예: 2024(연간) = 2025 사업보고서의 전기, 2023(연간) = 2025 사업보고서의 전전기.
   - 분기·누적 값은 그 분기 보고서의 당기 값(공시 당시 값). 보고서가 없을 때만 다음 해 보고서의 전기 값으로 메운다.
   - 손익 분기 값 = 보고서의 3개월 값, 4분기 = 연간 − 3분기 누적. 현금흐름 분기 값 = 누적 차이.
@@ -43,9 +44,8 @@ from dartFinance import API, CACHE_DIR, _amt, _key, fetch_statement, get_corp_ma
 
 Q_REPRT = {1: '11013', 2: '11012', 3: '11014', 4: '11011'}
 WINDOW_START = (2025, 1)      # 이 달 이후에 끝나는 기간을 수집한다
-QUARTER_START = (2024, 10)    # 분기(3개월) 값은 이 달 이후에 끝나는 분기부터 낸다 (2024/4Q — FnGuide 분기 열의 시작)
+QUARTER_START = (2024, 10)    # 분기(3개월) 값은 이 달 이후에 끝나는 분기부터 낸다 (2024/4Q)
                               # WINDOW_START 앞의 분기는 보고서를 받지 않고 다음 해 보고서의 전기 값으로 만든다
-                              # (2024년 보고서를 직접 받아도 FnGuide 일치 칸이 830 → 831로 거의 같았다)
 RECHECK_NODATA_DAYS = 7       # 최근 분기의 '데이터 없음' 캐시는 이 기간이 지나면 다시 조회 (나중에 공시될 수 있음)
 DEBUG = bool(os.environ.get('DART_FIN_DEBUG'))   # 정의 후보(현금A~E, 판관비2)를 함께 내보낸다 (검증용)
 
@@ -62,7 +62,7 @@ _IS_ACCOUNTS = [
      ['법인세비용차감전순이익', '법인세비용차감전계속사업이익', '법인세차감전순이익', '법인세비용차감전순손익']),
     ('법인세비용', ['ifrs-full_IncomeTaxExpenseContinuingOperations'], ['법인세비용', '법인세비용(수익)']),
     ('당기순이익', ['ifrs-full_ProfitLoss'], ['당기순이익', '분기순이익', '반기순이익', '당기순손익']),
-    # 보험업: 영업수익 = 보험영업수익 + 투자영업수익 (+ 별도 줄로 공시된 기타영업수익)
+    # 보험업 영업수익의 구성 항목 (합산은 derive)
     ('_보험영업수익', ['dart_OperatingIncomeInsurance'], ['보험영업수익', '보험서비스수익']),
     ('_투자영업수익', ['ifrs-full_InvestmentIncome', 'dart_OperatingIncomeInvestment'],
      ['투자영업수익', '투자서비스수익', '투자수익']),
@@ -86,7 +86,7 @@ _RAW = [m for m, _, _ in _IS_ACCOUNTS + _CF_ACCOUNTS]
 _CF_SET = {m for m, _, _ in _CF_ACCOUNTS}
 _STOCK = {'_기초현금', '_기말현금'}     # 잔액(누적 흐름이 아님)
 
-# 저장할 지표 순서 (FnGuide finance 파일의 지표 이름)
+# 시트별로 저장할 지표와 순서
 _COMMON = ['영업이익', '세전계속사업이익', '법인세비용', '당기순이익',
            '영업활동현금흐름', '투자활동현금흐름', '재무활동현금흐름', '현금성자산증가']
 SHEET_INDICATORS = {
@@ -99,7 +99,7 @@ SHEET_INDICATORS = {
 SHEET_ORDER = ['제조업', '은행업', '증권업', '보험업', '창투업']
 META_COLS = ['종목코드', '종목명', '업종', '주요제품', '결산월', '연결구분', '업종구분', '최근보고서', '수집메모']
 
-# FnGuide 업종 시트와 맞추기 위한 예외 (KRX 업종 '기타 금융업'은 지주·은행·증권·창투가 섞여 있다)
+# KRX 업종 '기타 금융업'은 지주·은행·증권·창투가 섞여 있어 종목명으로 가른다
 _SECURITIES_HOLDING = {'메리츠금융지주', '한국금융지주'}
 _VENTURE_KEYS = ('인베스트먼트', '벤처', '창투', '기술투자', 'IB', '린드먼', '컴퍼니케이', '캡스톤', '큐캐피탈')
 
@@ -335,9 +335,7 @@ def collectFinance(code, name=None, industry=None, today=None):
             return None
         return a - b
 
-    # ── 외화 → 원화 환산 (FnGuide 값에서 역산한 기준. 한국은행 매매기준율)
-    #   모든 외화 공시 기업에 같은 방식을 쓴다. FnGuide는 일부 기업(프레스티지바이오파마·코오롱티슈진·파이온엑스)의
-    #   현금흐름을 평균환율로 환산해 값이 다르지만, DART 원본 + 한 가지 방식을 기준으로 삼는다 (2026-11 결정)
+    # ── 외화 → 원화 환산 (한국은행 매매기준율. 모든 외화 공시 기업에 같은 방식)
     #   손익: 회계연도 시작일~기간말의 평균환율. 분기(3개월) 값에도 그 분기까지의 누적 평균환율을 곱한다
     #         4분기 = 연간 환산액 − 1~3분기 환산액
     #   현금흐름: 누적 금액 × 기간말 환율. 분기 = 누적 환산액의 차이
@@ -374,7 +372,7 @@ def collectFinance(code, name=None, industry=None, today=None):
         out_annual, out_cum, out_quarter = annual, own_cum, quarter
 
     def derive(get):
-        """원시 계정 → FnGuide 지표 이름. get(m)은 한 기간의 원시 값."""
+        """원시 계정 → 저장 지표. get(m)은 한 기간의 원시 값."""
         d = {m: get(m) for m in _RAW + ['_기말기초차'] if m not in _STOCK}
         # 비용을 음수로 공시하는 회사가 있어 부호를 맞춘다 (비용은 양수)
         for k in ('매출원가', '판관비', '영업비용'):
@@ -388,18 +386,18 @@ def collectFinance(code, name=None, industry=None, today=None):
         if sheet == '제조업' and d['매출총이익'] is None and d['매출원가'] is None \
                 and None not in (d['매출액'], d['영업비용']):
             d['매출총이익'] = d['매출액']   # 매출원가 없이 영업비용만 공시: 매출총이익 = 매출액, 판관비 = 영업비용 전체
-        # 판관비는 FnGuide와 같이 '매출총이익 − 영업이익'(매출총이익 아래 영업비용 전체). 계산할 수 없으면 공시된 판관비
+        # 판관비 = 매출총이익 − 영업이익 (매출총이익 아래 영업비용 전체). 계산할 수 없으면 공시된 판관비
         if None not in (d['매출총이익'], d['영업이익']):
             d['_판관비_공시'], d['판관비'] = d['판관비'], d['매출총이익'] - d['영업이익']
         d['영업수익'] = d['매출액']
         if sheet == '보험업' and None not in (d['_보험영업수익'], d['_투자영업수익']):
-            # 보험업(FnGuide 기준): 영업수익 = 보험 + 투자 (+ 기타영업수익), 영업비용 = 영업수익 − 영업이익
+            # 보험업: 영업수익 = 보험 + 투자 (+ 별도 줄로 공시된 기타영업수익), 영업비용 = 영업수익 − 영업이익
             d['영업수익'] = d['_보험영업수익'] + d['_투자영업수익'] + (d['_기타영업수익'] or 0.0)
             d['영업비용'] = None
         if d['영업비용'] is None and d['영업수익'] is not None and d['영업이익'] is not None:
             d['영업비용'] = d['영업수익'] - d['영업이익']
         if d['판관비'] is not None and d['영업이익'] is not None:
-            d['순영업수익'] = d['영업이익'] + d['판관비']     # 순영업수익 = 영업이익 + 판관비 (FnGuide 가공 지표의 근사)
+            d['순영업수익'] = d['영업이익'] + d['판관비']     # FnGuide '순영업이익'의 근사
         o, i, f, fx = d['영업활동현금흐름'], d['투자활동현금흐름'], d['재무활동현금흐름'], d['_환율변동효과']
         if DEBUG:
             d['현금A'] = None if None in (o, i, f) else o + i + f + (fx or 0.0)
@@ -408,7 +406,7 @@ def collectFinance(code, name=None, industry=None, today=None):
             d['현금D'] = d['_현금증감_환율전']
             d['현금E'] = None if None in (o, i, f) else o + i + f
             d['판관비2'] = None if None in (d['매출총이익'], d['영업이익']) else d['매출총이익'] - d['영업이익']
-        # 현금성자산증가 = 기말 − 기초 (환율변동효과 포함, FnGuide와 같은 기준). 없으면 영업+투자+재무+환율효과, 공시된 증감 순
+        # 현금성자산증가 = 기말 − 기초 (환율변동효과 포함). 없으면 영업+투자+재무+환율효과, 공시된 증감 순
         inc = d['_기말기초차']
         if inc is None and None not in (o, i, f):
             inc = o + i + f + (fx or 0.0)
@@ -465,7 +463,7 @@ def _col_key(c):
 
 
 def build_finance_sheets(df):
-    """수집 결과 DataFrame → 업종별 시트 [(시트명, DataFrame)] (fngCollect._build_finance_sheets 와 같은 구성)."""
+    """수집 결과 DataFrame → 업종별 시트 [(시트명, DataFrame)]."""
     sheets = []
     for name in SHEET_ORDER:
         idf = df[df['업종구분'] == name].reset_index(drop=True)

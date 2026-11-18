@@ -97,7 +97,7 @@ def strategy_peg(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         result["PEG_점수"] = _normalize(result["PEG_점수"])
         result = result.sort_values("PEG_점수", ascending=False)
 
-    output_cols = ["종목코드", "종목명", "마켓분야", "FICS분야",
+    output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야",
                    "PER_사용", "EPS증가율_사용", "PEG", "부채비율_사용", "PEG_점수"]
     output_cols = [c for c in output_cols if c in result.columns]
 

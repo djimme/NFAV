@@ -147,7 +147,7 @@ def _show_composite_top(df: pd.DataFrame, n: int = 20):
 
     section(f"종합 랭킹 TOP {n}")
     score_cols = [c for c in df.columns if "점수" in c or c == "종합점수"]
-    show_cols  = ["종목코드", "종목명", "마켓분야", "FICS분야"] + score_cols
+    show_cols  = ["종목코드", "종목명", "마켓분야", "WI26분야"] + score_cols
 
     show_cols  = [c for c in show_cols if c in df.columns]
     top = df[show_cols].head(n).reset_index(drop=True)
@@ -214,8 +214,9 @@ def review_and_order(results: dict, api) -> None:
     section("종목 검토 & 매수 주문")
 
     # 종합 랭킹 출력 (상위 30개)
-    top30 = composite[["종목코드", "종목명", "마켓분야", "FICS분야", "종합점수",
-                        "참여전략수"]].head(30).reset_index(drop=True)
+    top30_cols = [c for c in ["종목코드", "종목명", "마켓분야", "WI26분야", "종합점수", "참여전략수"]
+                  if c in composite.columns]
+    top30 = composite[top30_cols].head(30).reset_index(drop=True)
     top30.index += 1
     print(top30.to_string())
     hr()

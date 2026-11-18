@@ -40,7 +40,8 @@ def build_composite_score(
 
     점수가 있는 전략에만 가중치 적용.
     """
-    result = base_df[["종목코드", "종목명", "마켓분야", "FICS분야"]].copy()
+    result = base_df[[c for c in ["종목코드", "종목명", "마켓분야", "WI26분야"]
+                      if c in base_df.columns]].copy()
 
     joins = [
         (peg_df,        "PEG_점수",         "peg"),

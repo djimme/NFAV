@@ -5,7 +5,7 @@
   dart_balance  - OpenDART 최신 재무상태표 + 당기순이익(누적)  → derived/dart_balance_YYYY_MM.xlsx
   dart_finance  - OpenDART 손익계산서·현금흐름표 (연간·누적·분기, 업종별 시트) → derived/dart_finance_YYYY_MM.xlsx
                   (FnGuide finance 파일과 같은 컬럼 이름. 종목당 보고서 5~7건을 조회한다)
-  dart_ratio    - DART 재무제표로 직접 계산한 재무비율·EPS·BPS·PER·PBR (FnGuide ratio·snapshot 대체, 연간) → derived/dart_ratio_YYYY_MM.xlsx
+  dart_ratio    - DART 재무제표로 직접 계산한 재무비율·EPS·BPS·PER·PBR (연간) → derived/dart_ratio_YYYY_MM.xlsx
                   (dart_finance 가 받아 둔 사업보고서 캐시를 쓴다. 먼저 dart_finance 를 실행할 것)
   krx_marketcap - KRX Open API 전 종목 시가총액·종가·상장주식수 (기본) → derived/market_cap_YYYY_MM_DD.xlsx
                   (시장별 1회 호출로 전 종목. 파일명의 날짜는 KRX 기준 거래일)

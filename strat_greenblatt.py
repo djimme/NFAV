@@ -77,7 +77,7 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     # 정규화 점수 (랭크합이 낮을수록 좋음 → 역수)
     result["Greenblatt_점수"] = _normalize(1 / result["Magic_랭크합"])
 
-    output_cols = ["종목코드", "종목명", "마켓분야", "FICS분야",
+    output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야",
                    "수익수익률", "ROIC_사용", "EY_랭크", "ROIC_랭크",
                    "Magic_랭크합", "Greenblatt_점수"]
     if "부채비율_사용" in result.columns:

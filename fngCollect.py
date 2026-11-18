@@ -11,6 +11,7 @@ krxStocks 종목 기본정보 + FnGuide 각 페이지 투자지표를 결합하�
   investidx - FnGuide Investment Index (SVD_Invest)
   all       - 위 모듈 전체를 순차적으로 수집하여 하나로 합침
 """
+import os
 import re
 import pandas as pd
 from datetime import datetime
@@ -23,28 +24,28 @@ from fin_utils import save_styled_excel, save_styled_excel_multisheet
 
 MODULE_CONFIG = {
     'snapshot': {
-        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
-        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
+        'extra_base_fields': ['마켓분야', 'WI26분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'WI26분야', '결산월'},
         'indicator_order': [
-            '영업이익률(%)', '부채비율(%)', '유보율(%)', '지배주주순이익률(%)',
+            '영업이익률(%)', '부채비율(%)', '유보율(%)', '순이익률(지배)(%)',
             'PER(배)', 'EPS(원)', 'PBR(배)', 'BPS(원)',
-            'ROA(배)', 'ROE(배)', '배당수익률(%)', '발행주식수(천주)',
+            'ROA(배)', 'ROE(배)', '현금배당수익률(%)', '발행주식수(천주)',
         ],
         'description': 'FnGuide Snapshot (SVD_Main)',
         'output_prefix': 'snapshot',
     },
     'finance': {
-        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
-        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
+        'extra_base_fields': ['마켓분야', 'WI26분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'WI26분야', '결산월'},
         'indicator_order': [
             # 손익계산서 — 비금융
             '매출액', '매출원가', '매출총이익',
             # 손익계산서 — 은행/금융지주
-            '순영업수익',
-            # 손익계산서 — 보험/창투사
+            '순영업이익',
+            # 손익계산서 — 보험
             '영업수익', '영업비용',
-            # 손익계산서 — 공통
-            '판관비', '영업이익', '세전계속사업이익', '법인세비용', '당기순이익',
+            # 손익계산서 — 공통 ('법인세비용차감전계속사업이익'을 '법인세비용'보다 앞에 둔다: 부분문자열 매칭)
+            '판관비', '영업이익', '법인세비용차감전계속사업이익', '법인세비용', '당기순이익',
             # 현금흐름표 — 공통
             '영업활동현금흐름', '투자활동현금흐름', '재무활동현금흐름', '현금성자산증가',
         ],
@@ -52,29 +53,29 @@ MODULE_CONFIG = {
         'output_prefix': 'finance',
     },
     'ratio': {
-        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
-        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
+        'extra_base_fields': ['마켓분야', 'WI26분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'WI26분야', '결산월'},
         'indicator_order': [
             # 안정성
-            '유동비율', '부채비율', '유보율', '순차입금비율', '이자보상배율', '자기자본비율',
+            '유동비율', '당좌비율', '부채비율', '유보율', '순부채비율', '이자보상배율', '자기자본비율',
             '예대율', '유가증권보유율', '운용자산비율',
             # 성장성
-            '매출증가율', '판관비증가율', 'EPS증가율', '영업이익증가율', 'EBITDA증가율',
-            '순이익증가율', '총자산증가율', '대출채권증가율', '예수부채증가율',
+            '매출액증가율', '판매비와관리비증가율', 'EPS증가율', '영업이익증가율',
+            'EBITDA증가율', '당기순이익증가율(지배)', '총자산증가율', '대출채권증가율', '예수부채증가율',
             # 수익성 (ROIC → ROE 순서: 부분문자열 매칭 오작동 방지)
-            '매출총이익률', '세전계속이익률', '영업이익률', 'EBITDA마진율',
+            '매출총이익률', '세전계속사업이익률', '영업이익률', 'EBITDA마진율',
             'ROIC', 'ROA', 'ROE',
-            '판관비율', 'NIM', '예대마진율',
-            '순이익률', '운용자산이익률', '손해율', '순사업비율',
+            '순이자마진율', '예대마진율', '영업수지율',
+            '당기순이익이익률(지배)', '손해율', '순사업비율',
             # 활동성
-            '총자산회전율', '타인자본회전율', '자기자본회전율', '순운전자본회전율',
+            '총자산회전율', '총부채회전율', '자기자본회전율', '순운전자본회전율',
         ],
         'description': 'FnGuide Finance Ratio (SVD_FinanceRatio)',
         'output_prefix': 'finance_ratio',
     },
     'investidx': {
-        'extra_base_fields': ['마켓분야', 'FICS분야', '결산월'],
-        'skip_keys': {'종목명', '마켓분야', 'FICS분야', '결산월'},
+        'extra_base_fields': ['마켓분야', 'WI26분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'WI26분야', '결산월'},
         'indicator_order': [
             # 멀티팩터 스타일 분석 — 팩터별 (종목, 업종) 쌍 순서
             '팩터_업종명',
@@ -85,20 +86,34 @@ MODULE_CONFIG = {
             '기업투자_종목', '기업투자_업종',
             '거시경제 민감도_종목', '거시경제 민감도_업종',
             '모멘텀_종목', '모멘텀_업종',
-            '단기 Reversal_종목', '단기 Reversal_업종',
+            '단기 Return_종목', '단기 Return_업종',
             '기업규모_종목', '기업규모_업종',
             '거래도_종목', '거래도_업종',
             '밸류_종목', '밸류_업종',
             '변동성_종목', '변동성_업종',
             # 기업가치 Per Share
-            'EPS', 'EBITDAPS', 'CFPS', 'SPS', 'BPS', 'DPS', '배당성향',
+            'EPS', 'EBITDAPS', 'CFPS', 'SPS', 'BPS', '수정DPS', '현금배당성향',
             # 기업가치 Multiples
             'PER', 'PCR', 'PSR', 'PBR', 'EV',
             # 기업가치 FCF
-            '총현금흐름', '총투자', 'FCFF',
+            '영업활동으로인한현금흐름', 'CAPEX', 'FCF',
         ],
         'description': 'FnGuide Investment Index (SVD_Invest)',
         'output_prefix': 'invest_idx',
+    },
+    # 컨센서스(추정 실적) — 2026년 개편 후 생긴 페이지. 'all' 에는 넣지 않는다(연도_PER 등 컬럼 이름이 investidx 와 겹침)
+    'consensus': {
+        'extra_base_fields': ['마켓분야', 'WI26분야', '결산월'],
+        'skip_keys': {'종목명', '마켓분야', 'WI26분야', '결산월'},
+        'indicator_order': [
+            '추정연도', '추정기준일', '리포트수',
+            '매출액', '영업이익', '당기순이익(지배)', '당기순이익(비지배)', '당기순이익',
+            '자산총계', '부채총계', '자본총계(지배)', '자본총계(비지배)', '자본총계', '자본금',
+            'EPS(원)', 'BPS(원)', '현금DPS(원)', 'PER(Fwd. 12M)', 'PER', 'PBR',
+            '목표주가(원)', '투자의견(점수)',
+        ],
+        'description': 'FnGuide Consensus (CompanyInfo/Consensus)',
+        'output_prefix': 'consensus',
     },
     'all': {
         'description': 'FnGuide 전체 (Snapshot + Finance + Ratio + InvestIdx)',
@@ -124,6 +139,9 @@ def _get_module_fns(module_name):
     elif module_name == 'investidx':
         from fnguideInvestIdx import collectInvestIdx
         return collectInvestIdx
+    elif module_name == 'consensus':
+        from fnguideConsensus import collectConsensus
+        return collectConsensus
     else:
         raise ValueError(f"Unknown module: {module_name}")
 
@@ -182,7 +200,7 @@ def process_single_stock(args):
             if not row['종목명']:
                 row['종목명'] = indicators.get('종목명', '')
 
-            # 모듈별 추가 기본 필드 (예: snapshot의 마켓분야, FICS분야)
+            # 모듈별 추가 기본 필드 (예: snapshot의 마켓분야, WI26분야)
             for field in config['extra_base_fields']:
                 row[field] = indicators.get(field, '')
 
@@ -242,7 +260,7 @@ def _order_columns(df, indicator_order):
     indicator_order에 지정된 지표 순서대로 컬럼을 배치한다.
     각 지표 내에서는 컬럼명 알파벳순(연도순/기간순)으로 정렬된다.
     """
-    base_cols = ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월']
+    base_cols = ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'WI26분야', '결산월']
     ordered = [c for c in base_cols if c in df.columns]
 
     remaining = [c for c in df.columns if c not in ordered]
@@ -288,11 +306,15 @@ def collect_all_stocks(module_name='snapshot', use_multiprocessing=True):
     print(f"{config['description']} 데이터 수집 시작")
     print("=" * 50)
 
-    if use_multiprocessing:
-        with mp.Pool(processes=mp.cpu_count()) as pool:
-            results = pool.map(process_single_stock, args_list)
-    else:
-        results = [process_single_stock(args) for args in args_list]
+    # 요청 속도 제한: 프로세스 수는 FNGUIDE_WORKERS(기본 2), 프로세스마다 요청 전 fin_utils.FNGUIDE_DELAY(기본 1초) 쉰다.
+    # → 초당 약 1.5건. CPU 수만큼 띄워 간격 없이 요청하던 예전 방식은 쓰지 않는다.
+    workers = max(1, int(os.environ.get('FNGUIDE_WORKERS', '2'))) if use_multiprocessing else 1
+    results = []
+    with mp.Pool(processes=workers) as pool:
+        for i, r in enumerate(pool.imap(process_single_stock, args_list, chunksize=5), 1):
+            results.append(r)
+            if i % 100 == 0 or i == len(args_list):
+                print(f"  [{datetime.now():%H:%M:%S}] {i}/{len(args_list)} 처리, 성공 {sum(x is not None for x in results)}", flush=True)
 
     valid_results = [r for r in results if r is not None]
     print(f"\n성공: {len(valid_results)}개 / 전체: {len(stock_list)}개")
@@ -309,7 +331,7 @@ def collect_all_stocks(module_name='snapshot', use_multiprocessing=True):
 
 def _filter_industry_columns(df, indicators):
     """업종 지표 목록에 매칭되는 컬럼만 추출 (기본 컬럼 포함, 정렬 유지)"""
-    base_cols = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월'] if c in df.columns]
+    base_cols = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'WI26분야', '결산월'] if c in df.columns]
     remaining = [c for c in df.columns if c not in base_cols]
 
     ordered = []
@@ -332,7 +354,6 @@ def _build_ratio_sheets(df):
         detect_industry_type, INDUSTRY_INDICATORS,
         INDUSTRY_TYPE_MANUFACTURING, INDUSTRY_TYPE_BANKING,
         INDUSTRY_TYPE_SECURITIES, INDUSTRY_TYPE_INSURANCE,
-        INDUSTRY_TYPE_VENTURE,
     )
 
     industry_order = [
@@ -340,11 +361,10 @@ def _build_ratio_sheets(df):
         INDUSTRY_TYPE_BANKING,
         INDUSTRY_TYPE_SECURITIES,
         INDUSTRY_TYPE_INSURANCE,
-        INDUSTRY_TYPE_VENTURE,
     ]
 
     market_col = '마켓분야' if '마켓분야' in df.columns else None
-    fics_col   = 'FICS분야' if 'FICS분야' in df.columns else None
+    fics_col   = 'WI26분야' if 'WI26분야' in df.columns else None
 
     def get_type(row):
         market = row[market_col] if market_col else ''
@@ -361,7 +381,7 @@ def _build_ratio_sheets(df):
             continue
         cols = _filter_industry_columns(idf, INDUSTRY_INDICATORS.get(itype, []))
         # 값이 하나라도 있는 컬럼만 유지 (기본 컬럼은 항상 포함)
-        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월'] if c in cols]
+        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'WI26분야', '결산월'] if c in cols]
         indicator_cols = [c for c in cols if c not in base and idf[c].notna().any()]
         sheets.append((itype, idf[base + indicator_cols]))
 
@@ -374,8 +394,10 @@ def _build_finance_sheets(df):
 
     업종별 손익계산서 계정 구조:
       비금융 : 매출액, 매출원가, 매출총이익, 판관비 + 공통
-      은행/증권: 순영업수익, 판관비 + 공통   (두 업종 동일 template)
-      보험/창투: 영업수익, 영업비용 + 공통   (두 업종 동일 template)
+      은행/증권: 순영업이익, 판관비 + 공통   (두 업종 동일 template)
+      보험   : 영업수익, 영업비용 + 공통
+    은행업 시트에는 WI26 '은행'의 기타금융 회사(창투사 등)도 들어오는데 이들은 다른 업종 양식을 쓴다.
+    그래서 다른 업종의 항목도 뒤에 붙여 두고, 값이 없는 열은 시트에서 뺀다.
 
     Returns:
         [(sheet_name, DataFrame), ...] — 데이터가 있는 업종만 포함
@@ -384,32 +406,32 @@ def _build_finance_sheets(df):
         detect_industry_type,
         INDUSTRY_TYPE_MANUFACTURING, INDUSTRY_TYPE_BANKING,
         INDUSTRY_TYPE_SECURITIES, INDUSTRY_TYPE_INSURANCE,
-        INDUSTRY_TYPE_VENTURE,
     )
 
     _COMMON = [
-        '영업이익', '세전계속사업이익', '법인세비용', '당기순이익',
+        '영업이익', '법인세비용차감전계속사업이익', '법인세비용', '당기순이익',
         '영업활동현금흐름', '투자활동현금흐름', '재무활동현금흐름', '현금성자산증가',
     ]
 
     finance_indicators = {
         INDUSTRY_TYPE_MANUFACTURING: ['매출액', '매출원가', '매출총이익', '판관비'] + _COMMON,
-        INDUSTRY_TYPE_BANKING:       ['순영업수익', '판관비'] + _COMMON,
-        INDUSTRY_TYPE_SECURITIES:    ['순영업수익', '판관비'] + _COMMON,
+        INDUSTRY_TYPE_BANKING:       ['순영업이익', '판관비'] + _COMMON,
+        INDUSTRY_TYPE_SECURITIES:    ['순영업이익', '판관비'] + _COMMON,
         INDUSTRY_TYPE_INSURANCE:     ['영업수익', '영업비용'] + _COMMON,
-        INDUSTRY_TYPE_VENTURE:       ['영업수익', '영업비용'] + _COMMON,
     }
+    _all = list(dict.fromkeys(i for v in finance_indicators.values() for i in v))
+    for _v in finance_indicators.values():
+        _v.extend(i for i in _all if i not in _v)
 
     industry_order = [
         INDUSTRY_TYPE_MANUFACTURING,
         INDUSTRY_TYPE_BANKING,
         INDUSTRY_TYPE_SECURITIES,
         INDUSTRY_TYPE_INSURANCE,
-        INDUSTRY_TYPE_VENTURE,
     ]
 
     market_col = '마켓분야' if '마켓분야' in df.columns else None
-    fics_col   = 'FICS분야' if 'FICS분야' in df.columns else None
+    fics_col   = 'WI26분야' if 'WI26분야' in df.columns else None
 
     def get_type(row):
         market = row[market_col] if market_col else ''
@@ -425,7 +447,7 @@ def _build_finance_sheets(df):
         if idf.empty:
             continue
         cols = _filter_industry_columns(idf, finance_indicators.get(itype, []))
-        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'FICS분야', '결산월'] if c in cols]
+        base = [c for c in ['종목코드', '종목명', '업종', '주요제품', '마켓분야', 'WI26분야', '결산월'] if c in cols]
         indicator_cols = [c for c in cols if c not in base and idf[c].notna().any()]
         sheets.append((itype, idf[base + indicator_cols]))
 
