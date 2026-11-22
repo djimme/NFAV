@@ -32,17 +32,17 @@ DATA_CONFIG = {
     "data_dir": "derived",
     # FnGuide 수집 결과 (python fngCollect.py all) — '*' 패턴이면 가장 최근 월 파일을 자동 선택
     #   예: snapshot_2026_04.xlsx 와 snapshot_2026_11.xlsx 가 있으면 11월 파일
-    #   finance·ratio 의 2026_04_v2 는 파서 수정 후 4월 캐시로 재생성한 파일 (scripts/rebuild_from_cache.py)
     "snapshot_file": "derived/snapshot_2*.xlsx",
-    #   finance 는 환경변수(또는 .env) NFAV_FINANCE_FILE 로 바꿔 볼 수 있다 — 기본값은 FnGuide 파일 그대로
-    #   예: NFAV_FINANCE_FILE=derived/dart_finance_2*.xlsx  (DART 손익·현금흐름, python apiCollect.py dart_finance)
-    "finance_file": get_env("NFAV_FINANCE_FILE", "derived/finance_2*.xlsx"),
+    #   finance(손익·현금흐름)의 기본값은 DART 파일 (python apiCollect.py dart_finance → derived/dart_finance_*.xlsx)
+    #   환경변수(또는 .env) NFAV_FINANCE_FILE 로 바꿔 볼 수 있다
+    #   예: NFAV_FINANCE_FILE=derived/finance_2*.xlsx  (FnGuide finance 파일 — 비교·검증용)
+    "finance_file": get_env("NFAV_FINANCE_FILE", "derived/dart_finance_2*.xlsx"),
     "ratio_file": "derived/finance_ratio_2*.xlsx",
     "invest_idx_file": "derived/invest_idx_2*.xlsx",
 
     # 재무비율·주당 지표(EPS·BPS·PER·PBR·ROIC·EV/EBITDA 등)의 출처 — 환경변수(또는 .env) NFAV_RATIO_SOURCE
     #   "dart"   : DART·KRX로 직접 계산한 값 (기본값. python apiCollect.py dart_ratio → derived/dart_ratio_*.xlsx)
-    #   "fnguide": FnGuide 4월 파일 값 그대로 (2026-04 이후 갱신되지 않는다 — 비교·검증용)
+    #   "fnguide": FnGuide 수집 파일(ratio_file·invest_idx_file·snapshot_file) 값 그대로 — 비교·검증용
     "ratio_source": get_env("NFAV_RATIO_SOURCE", "dart"),
     "dart_ratio_file": "derived/dart_ratio_2*.xlsx",
     #   "current": 최근 사업연도의 PER·PBR·EV 배수를 최근 거래일 종가로 계산 / "fiscal_year_end": 결산월 말 종가(검증용)
