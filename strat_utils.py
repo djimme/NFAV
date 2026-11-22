@@ -2,6 +2,7 @@
 # 전략 모듈 공통 유틸리티
 # - FnGuide Excel 파일 로딩 (load_all_data, merge_base)
 # - 공식 API 원천 데이터 로딩: DART 재무상태표, 시가총액 (선택, 파일이 있으면 병합)
+# - 업종 분류 로딩: KRICS 섹터·산업그룹 (선택, sectorCollect.py 결과 파일이 있으면 병합)
 # - 공통 종목 필터 (apply_common_filters)
 # - 동적 컬럼 탐색 헬퍼 (_recent_cols, _best_col)
 # - 정규화 헬퍼 (_normalize)
@@ -95,6 +96,16 @@ def load_all_data(config: dict) -> dict:
         else:
             print(f"  ℹ️  {label} 파일 없음 ({config.get(cfg_key)}) → python apiCollect.py 로 수집")
 
+    # --- 업종 분류 (선택) — python sectorCollect.py 실행 결과의 '종목분류' 시트 ---
+    path = _latest_file(config.get("sector_map_file"))
+    if path:
+        df = pd.read_excel(path, sheet_name="종목분류", dtype=str)
+        df["종목코드"] = df["종목코드"].str.zfill(6)
+        data["sector_map"] = df
+        print(f"  ✅ 업종 분류(KRICS): {path} ({len(df)}개 종목)")
+    else:
+        print(f"  ℹ️  업종 분류 파일 없음 ({config.get('sector_map_file')}) → python sectorCollect.py 로 수집")
+
     # --- DART로 직접 계산한 재무비율·주당 지표 (선택) — python apiCollect.py dart_ratio ---
     #   ratio_source 가 "dart" 이면 FnGuide snapshot·ratio·invest_idx 의 해당 값을 이 파일 값으로 바꾼다 (merge_base)
     if config.get("ratio_source") == "dart":
@@ -126,6 +137,8 @@ DART_BALANCE_COLS = ["기준기간", "연결구분", "유동구분", "유동자�
                      "현금및현금성자산", "유동금융자산", "장기금융자산", "유동금융자산_기타", "장기금융자산_기타",
                      "이자부부채", "리스부채", "당기순이익(누적)"]
 MARKET_CAP_COLS = ["시가총액_억원", "종가", "전일종가", "상장주식수", "거래량", "거래대금_억원", "기준일", "출처"]
+# 업종 분류 파일(sector_map)에서 base에 합칠 컬럼 — WI26분야는 snapshot 값을 그대로 쓴다
+SECTOR_MAP_COLS = ["KRICS섹터", "KRICS산업그룹"]
 
 
 def merge_base(data: dict) -> pd.DataFrame:
@@ -134,6 +147,17 @@ def merge_base(data: dict) -> pd.DataFrame:
     모든 전략의 공통 베이스 DataFrame이 됩니다.
     """
     base = data["snapshot"].copy()
+
+    # 업종 분류 (있으면): KRICS섹터·KRICS산업그룹을 WI26분야 바로 뒤에 넣는다
+    #   KRICS에 없는 종목(외국 법인·스팩 등)은 빈 값으로 남는다
+    if "sector_map" in data:
+        sm = data["sector_map"]
+        cols = [c for c in SECTOR_MAP_COLS if c in sm.columns and c not in base.columns]
+        base = base.merge(sm.drop_duplicates("종목코드")[["종목코드"] + cols], on="종목코드", how="left")
+        if "WI26분야" in base.columns:
+            at = base.columns.get_loc("WI26분야") + 1
+            rest = [c for c in base.columns if c not in cols]
+            base = base[rest[:at] + cols + rest[at:]]
 
     # finance: 핵심 컬럼만 선택 (최근 연간 영업활동현금흐름, 당기순이익)
     fin = data["finance"]

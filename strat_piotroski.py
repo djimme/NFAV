@@ -132,7 +132,7 @@ def strategy_piotroski(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     for col in scores.columns:
         result[col] = scores.loc[result.index, col]
 
-    output_cols = (["종목코드", "종목명", "마켓분야", "WI26분야", "F_Score", "Piotroski_점수"]
+    output_cols = (["종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "KRICS산업그룹", "F_Score", "Piotroski_점수"]
                    + list(scores.columns) + ["연간기준연도"])
     output_cols = [c for c in output_cols if c in result.columns]
 

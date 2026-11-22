@@ -52,6 +52,10 @@ DATA_CONFIG = {
     #   시가총액 대체 소스: kb_marketcap → derived/market_cap_kb_*.xlsx (필요 시 아래 경로를 바꿔 사용)
     "dart_balance_file": "derived/dart_balance_*.xlsx",
     "market_cap_file": "derived/market_cap_2*.xlsx",   # KRX (market_cap_kb_* 는 제외)
+
+    # 업종 분류 (python sectorCollect.py → derived/sector_map_YYYY_MM_DD.xlsx) — 가장 최근 파일 사용
+    #   종목코드로 붙여 WI26분야 옆에 KRICS섹터·KRICS산업그룹 컬럼을 더한다. 파일이 없으면 건너뛴다
+    "sector_map_file": "derived/sector_map_2*.xlsx",
 }
 
 # =============================================================================

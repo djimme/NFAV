@@ -68,7 +68,7 @@ def strategy_multifactor(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     result = result.nlargest(top_n, "멀티팩터_점수")
     result["멀티팩터_점수"] = _normalize(result["멀티팩터_점수"])
 
-    output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야"] + factor_cols + ["멀티팩터_점수"]
+    output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "KRICS산업그룹"] + factor_cols + ["멀티팩터_점수"]
     output_cols = [c for c in output_cols if c in result.columns]
 
     print(f"  📊 멀티팩터 전략: {len(result)}개 종목 선정")
