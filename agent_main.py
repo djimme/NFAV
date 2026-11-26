@@ -122,6 +122,7 @@ def run_analysis() -> dict | None:
         "multifactor":"멀티팩터",
         "ncav":       "NCAV",
         "nfav":       "NFAV",
+        "value_trap": "가치함정_제외",
     }
     for key, label in label_map.items():
         df = results.get(key, pd.DataFrame())
@@ -185,6 +186,7 @@ def load_recent_results() -> dict | None:
         "multifactor":"멀티팩터",
         "ncav":       "NCAV",
         "nfav":       "NFAV",
+        "value_trap": "가치함정_제외",
     }.items()}
 
     for sheet in xl.sheet_names:

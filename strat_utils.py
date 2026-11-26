@@ -4,6 +4,7 @@
 # - 공식 API 원천 데이터 로딩: DART 재무상태표, 시가총액 (선택, 파일이 있으면 병합)
 # - 업종 분류 로딩: KRICS 섹터·산업그룹 (선택, sectorCollect.py 결과 파일이 있으면 병합)
 # - 공통 종목 필터 (apply_common_filters)
+# - 가치함정 필터 (apply_value_trap_filter): 감사의견 비적정, 최근 1년 CB·BW·유상증자, 부실 공시 (dartRisk.py 결과)
 # - 동적 컬럼 탐색 헬퍼 (_recent_cols, _best_col)
 # - 정규화 헬퍼 (_normalize)
 
@@ -106,6 +107,16 @@ def load_all_data(config: dict) -> dict:
     else:
         print(f"  ℹ️  업종 분류 파일 없음 ({config.get('sector_map_file')}) → python sectorCollect.py 로 수집")
 
+    # --- 가치함정 점검 자료 (선택) — python apiCollect.py dart_risk ---
+    path = _latest_file(config.get("dart_risk_file"))
+    if path:
+        df = pd.read_excel(path, dtype={"종목코드": str})
+        df["종목코드"] = df["종목코드"].str.zfill(6)
+        data["dart_risk"] = df
+        print(f"  ✅ 가치함정 점검 자료: {path} ({len(df)}개 종목)")
+    else:
+        print(f"  ℹ️  가치함정 점검 자료 없음 ({config.get('dart_risk_file')}) → python apiCollect.py dart_risk 로 수집")
+
     # --- DART로 직접 계산한 재무비율·주당 지표 (선택) — python apiCollect.py dart_ratio ---
     #   ratio_source 가 "dart" 이면 FnGuide snapshot·ratio·invest_idx 의 해당 값을 이 파일 값으로 바꾼다 (merge_base)
     if config.get("ratio_source") == "dart":
@@ -139,6 +150,11 @@ DART_BALANCE_COLS = ["기준기간", "연결구분", "유동구분", "유동자�
 MARKET_CAP_COLS = ["시가총액_억원", "종가", "전일종가", "상장주식수", "거래량", "거래대금_억원", "기준일", "출처"]
 # 업종 분류 파일(sector_map)에서 base에 합칠 컬럼 — WI26분야는 snapshot 값을 그대로 쓴다
 SECTOR_MAP_COLS = ["KRICS섹터", "KRICS산업그룹"]
+# 가치함정 점검 파일(dart_risk)에서 base에 합칠 컬럼 ('위험_' 접두어를 붙인다)
+DART_RISK_COLS = ["감사의견", "감사의견_판정", "감사_사업연도", "계속기업_불확실성",
+                  "CB_건수", "CB_최근일", "CB_금액_억원", "BW_건수", "BW_최근일", "BW_금액_억원",
+                  "EB_건수", "EB_최근일", "유상증자_건수", "유상증자_최근일", "유상증자_금액_억원", "유상증자_방식",
+                  "감자_건수", "감자_최근일", "부실_공시", "조회기간"]
 
 
 def merge_base(data: dict) -> pd.DataFrame:
@@ -198,6 +214,13 @@ def merge_base(data: dict) -> pd.DataFrame:
         mc = data["market_cap"]
         cols = [c for c in MARKET_CAP_COLS if c in mc.columns]
         base = base.merge(mc[["종목코드"] + cols], on="종목코드", how="left")
+
+    # 가치함정 점검 자료 (있으면): '위험_' 접두어로 합친다 → apply_value_trap_filter 가 읽는다
+    if "dart_risk" in data:
+        rk = data["dart_risk"]
+        cols = [c for c in DART_RISK_COLS if c in rk.columns]
+        rk = rk.drop_duplicates("종목코드")[["종목코드"] + cols].rename(columns={c: f"위험_{c}" for c in cols})
+        base = base.merge(rk, on="종목코드", how="left")
 
     # DART 재무비율·주당 지표 (ratio_source = "dart" 일 때만)
     if "dart_ratio" in data:
@@ -311,6 +334,85 @@ def apply_common_filters(df: pd.DataFrame, config: dict) -> pd.DataFrame:
 
     print(f"  🔍 공통 필터: {original}개 → {len(df)}개")
     return df
+
+
+# =============================================================================
+# 가치함정 필터
+# =============================================================================
+
+def apply_value_trap_filter(df: pd.DataFrame, cfg: dict) -> tuple:
+    """
+    싸 보이지만 싼 이유가 있는 종목(가치함정)을 모든 전략에 앞서 뺀다.
+
+    자료: python apiCollect.py dart_risk → derived/dart_risk_YYYY_MM.xlsx (merge_base 가 '위험_' 열로 합친다)
+
+    제외 사유 (cfg 의 exclude_* 가 True 인 것만 적용):
+      감사의견 비적정     최근 사업보고서 감사의견이 한정·부적정·의견거절
+      계속기업 불확실성   감사보고서 강조사항에 '계속기업' 언급
+      CB·BW 발행         최근 1년 안에 전환사채·신주인수권부사채 발행 결정
+      EB 발행            최근 1년 안에 교환사채 발행 결정 (기본은 표시만)
+      유상증자           최근 1년 안에 유상증자 결정
+      감자               최근 1년 안에 감자 결정 (기본은 표시만)
+      부실 공시           회생절차·해산사유·영업정지·부도·채권은행 관리절차 등
+
+    min_issue_to_cap_pct: CB·BW·유상증자 금액 합계가 시가총액의 이 비율(%) 미만이면 발행 사유로는 빼지 않는다.
+      0(기본)이면 금액과 관계없이 뺀다. 금액을 모르는 종목은 뺀다.
+
+    반환: (통과 종목 DataFrame, 제외 종목 DataFrame — '제외사유' 열 포함)
+    감사의견을 확인할 수 없는 종목(신규 상장 등)은 빼지 않는다.
+    """
+    empty = pd.DataFrame()
+    if not cfg or not cfg.get("enabled", True):
+        return df, empty
+    if "위험_감사의견_판정" not in df.columns:
+        print("  ⚠️ 가치함정 필터: 점검 자료가 없어 건너뜀 → python apiCollect.py dart_risk 로 수집")
+        return df, empty
+
+    def num(c):
+        return pd.to_numeric(df[c], errors="coerce").fillna(0) if c in df.columns else pd.Series(0, index=df.index)
+
+    def flag(c):
+        if c not in df.columns:
+            return pd.Series(False, index=df.index)
+        return df[c].astype(str).str.lower().isin(["true", "1", "1.0"])
+
+    cb_bw = (num("위험_CB_건수") + num("위험_BW_건수")) > 0
+    rights = num("위험_유상증자_건수") > 0
+    min_pct = cfg.get("min_issue_to_cap_pct", 0) or 0
+    if min_pct > 0 and "시가총액_억원" in df.columns:
+        amt = num("위험_CB_금액_억원") + num("위험_BW_금액_억원") + num("위험_유상증자_금액_억원")
+        cap = pd.to_numeric(df["시가총액_억원"], errors="coerce")
+        small = (amt > 0) & (cap > 0) & (amt / cap * 100 < min_pct)     # 금액을 모르면(0) 작다고 보지 않는다
+        cb_bw &= ~small
+        rights &= ~small
+
+    rules = [
+        ("exclude_bad_audit", True, "감사의견 비적정", df["위험_감사의견_판정"].astype(str) == "비적정"),
+        ("exclude_going_concern", True, "계속기업 불확실성", flag("위험_계속기업_불확실성")),
+        ("exclude_cb_bw", True, "CB·BW 발행", cb_bw),
+        ("exclude_eb", False, "EB 발행", num("위험_EB_건수") > 0),
+        ("exclude_rights_offering", True, "유상증자", rights),
+        ("exclude_capital_reduction", False, "감자", num("위험_감자_건수") > 0),
+        ("exclude_distress", True, "부실 공시",
+         df["위험_부실_공시"].notna() & (df["위험_부실_공시"].astype(str).str.strip() != "")
+         if "위험_부실_공시" in df.columns else pd.Series(False, index=df.index)),
+    ]
+    reason = pd.Series("", index=df.index)
+    counts = []
+    for key, default, label, mask in rules:
+        if not cfg.get(key, default):
+            continue
+        mask = mask.fillna(False)
+        reason[mask] = reason[mask].where(reason[mask] == "", reason[mask] + ", ") + label
+        counts.append(f"{label} {int(mask.sum())}")
+    out = reason != ""
+    excluded = df[out].copy()
+    excluded.insert(0, "제외사유", reason[out])
+    keep = ["제외사유", "종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "시가총액_억원"] + \
+           [c for c in df.columns if c.startswith("위험_")]
+    excluded = excluded[[c for c in keep if c in excluded.columns]].sort_values("제외사유").reset_index(drop=True)
+    print(f"  🔍 가치함정 필터: {len(df)}개 → {len(df) - int(out.sum())}개 (제외 {int(out.sum())}개 — {' · '.join(counts)})")
+    return df[~out], excluded
 
 
 # =============================================================================

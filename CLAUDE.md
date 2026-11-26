@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 투자 준비 사항 점검 (먼저 읽기)
+
+이 저장소는 투자 준비(데이터·코드·스킬) 작업의 일부다. 진행상황과 결정사항은 아래 점검표를 기준으로 한다.
+
+- 점검표: `E:\Investment\투자 준비 사항 점검.html` — 작업을 끝내면 해당 항목의 상태를 갱신하고 "점검 이력"에 한 줄 추가
+- 상세 기록: `docs/NFAV 데이터 기반 재설계 검토 요약.html`, `docs/NFAV 데이터 전환 현황.xlsx`
+- 운영 규칙: `E:\Investment\PROJECT_GUIDE.md`
+
+확정 결정 (2026-11-24):
+- 매매 증권사는 **KB증권**. 자동 매매는 종목 발굴 체계가 갖춰진 뒤 진행. `agent_main.py`·`agent_kis_api.py`(KIS)는 기존 코드로 두되 주 경로 아님. KIS API는 데이터 검증용
+- **FnGuide 컨센서스 수집 유지** (`fngCollect.py consensus`). 대체 소스 검증 후에도 대비용으로 계속 수집. 개인 분석용, 배포 금지
+- 기업분석 기본 스킬은 `company-analysis-kr`
+
+최우선 목표: 스크리닝 결과를 기업·산업 분석 스킬(`industry-map-korean`, `company-analysis-kr`, `price-decoder-korean`)과 하나로 연결.
+
+> 주의: 아래 섹션의 파일 목록·데이터 흐름 일부는 옛 구조(FnGuide 중심)를 설명한다. 현재 수집 엔트리는 `apiCollect.py`(DART·KRX·ECOS), `sectorCollect.py`(업종), `fngCollect.py`(FnGuide 보조)이고, 전략은 `strat_*.py`, API 키는 `.env`(`fin_utils.get_env`)다.
+
+폴더·전략 (2026-11-25):
+- 로컬 폴더 이름을 `invest_sec` (`E:\Github\invest_sec`)로 바꾸기로 확정. GitHub 저장소 이름(`djimme/NFAV`)과 원격 이름(`NFAV`)은 그대로 둔다 (git은 폴더 이름과 무관). 폴더·저장소 이름을 직접 바꾸는 순서는 `docs/폴더·저장소 이름 변경 안내.html`
+- 전략 설명: `docs/종목 선정 전략 설명.html`(풀어 쓴 설명), `strategy.md`(파라미터 레퍼런스)
+- 가치함정 필터: `python apiCollect.py dart_risk`(`dartRisk.py`) → `derived/dart_risk_YYYY_MM.xlsx` → `strat_utils.apply_value_trap_filter`. 설정은 `agent_config.COMMON_FILTERS["value_trap"]`
+
 ## Project Overview
 
 NFAV is a Korean stock market value investing analysis tool that calculates financial metrics to identify undervalued stocks. It focuses on:

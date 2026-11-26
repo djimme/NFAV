@@ -7,6 +7,8 @@
                   (FnGuide finance 파일과 같은 컬럼 이름. 종목당 보고서 5~7건을 조회한다)
   dart_ratio    - DART 재무제표로 직접 계산한 재무비율·EPS·BPS·PER·PBR (연간) → derived/dart_ratio_YYYY_MM.xlsx
                   (dart_finance 가 받아 둔 사업보고서 캐시를 쓴다. 먼저 dart_finance 를 실행할 것)
+  dart_risk     - 가치함정 점검: 감사의견 + 최근 1년 CB·BW·유상증자·감자·부실 공시 → derived/dart_risk_YYYY_MM.xlsx
+                  (전략 공통 필터 COMMON_FILTERS["value_trap"] 이 이 파일을 읽는다. 분기에 한 번 이상 갱신)
   krx_marketcap - KRX Open API 전 종목 시가총액·종가·상장주식수 (기본) → derived/market_cap_YYYY_MM_DD.xlsx
                   (시장별 1회 호출로 전 종목. 파일명의 날짜는 KRX 기준 거래일)
   kb_marketcap  - KB증권 종목기업개요 시가총액·PER·PBR (대체 소스, 종목별 호출) → derived/market_cap_kb_YYYY_MM_DD.xlsx
@@ -54,6 +56,12 @@ MODULE_CONFIG = {
         'workers': 3,
         'row_args': True,
     },
+    'dart_risk': {
+        'description': 'DART 가치함정 점검 (감사의견 · 최근 1년 CB·BW·유상증자 · 부실 공시)',
+        'output': lambda now: f'derived/dart_risk_{now:%Y_%m}.xlsx',
+        'workers': 3,
+        'row_args': True,
+    },
     'krx_marketcap': {
         'description': 'KRX 일별매매정보 시가총액 (유가증권·코스닥)',
         'output': None,  # KRX 기준 거래일로 파일명을 정한다
@@ -76,6 +84,9 @@ def _get_collect_fn(module):
     if module == 'dart_ratio':
         from dartRatio import collectRatio
         return collectRatio
+    if module == 'dart_risk':
+        from dartRisk import collectRisk
+        return collectRisk
     if module == 'kb_marketcap':
         from kbMarketCap import collectMarketCap
         return collectMarketCap

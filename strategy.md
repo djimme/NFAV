@@ -1,8 +1,46 @@
 # 전략 레퍼런스
 
-NFAV에서 사용하는 종목 선정 전략 목록. 각 전략의 이론·입력·출력·파라미터를 정리한 문서.
+이 저장소에서 사용하는 종목 선정 전략 목록. 각 전략의 이론·입력·출력·파라미터를 정리한 문서.
+풀어 쓴 설명은 `docs/종목 선정 전략 설명.html` 참고.
 
 파라미터는 `agent_config.py`의 `STRATEGY_CONFIG`에서 설정.
+
+현재 상태 (2026-11-25): PEG · Piotroski · 멀티팩터 · NCAV · NFAV 사용 중, Greenblatt는 제외(`enabled = False`).
+재무비율·주당 지표는 DART·KRX로 직접 계산한 값(`dart_ratio`)이 기본이고, 멀티팩터의 팩터 점수만 FnGuide 값을 쓴다.
+
+---
+
+## 0. 공통 필터 · 가치함정 필터
+
+모든 전략에 앞서 `strat_utils.apply_common_filters` → `apply_value_trap_filter` 순으로 적용한다.
+
+### 공통 필터 (COMMON_FILTERS)
+
+| 키 | 기본값 | 설명 |
+|----|--------|------|
+| `exclude_spac` | True | 스팩 제외 |
+| `min_market_cap_억` | 100 | 최소 시가총액(억원) |
+| `exclude_no_trade` | True | KRX 기준일 거래량 0 종목(거래정지 등) 제외 |
+| `min_trading_value_억` | 0 | 기준일 최소 거래대금(억원), 0이면 사용 안 함 |
+
+### 가치함정 필터 (COMMON_FILTERS["value_trap"])
+
+싸 보이지만 싼 이유가 있는 종목을 뺀다. 자료는 `python apiCollect.py dart_risk` → `derived/dart_risk_YYYY_MM.xlsx`
+(`dartRisk.py`: DART 감사의견 API + 최근 365일 주요사항보고서 목록). 파일이 없으면 필터를 건너뛴다.
+제외된 종목과 사유는 결과 파일의 `가치함정_제외` 시트에 남는다.
+
+| 키 | 기본값 | 제외 사유 |
+|----|--------|----------|
+| `exclude_bad_audit` | True | 최근 사업보고서 감사의견이 한정·부적정·의견거절 |
+| `exclude_going_concern` | True | 감사보고서 강조사항에 계속기업 불확실성 |
+| `exclude_cb_bw` | True | 최근 1년 전환사채(CB)·신주인수권부사채(BW) 발행 결정 |
+| `exclude_rights_offering` | True | 최근 1년 유상증자 결정 (배정 방식 구분 없음) |
+| `exclude_distress` | True | 회생절차·해산사유·영업정지·부도·채권은행 관리절차 공시 |
+| `exclude_eb` | False | 교환사채 발행 결정 (표시만) |
+| `exclude_capital_reduction` | False | 감자 결정 (표시만) |
+| `min_issue_to_cap_pct` | 0 | CB·BW·유상증자 금액 합계가 시가총액의 이 비율(%) 미만이면 발행 사유로는 빼지 않음. 0 = 금액과 관계없이 제외 |
+
+감사의견을 확인할 수 없는 종목(신규 상장 등)은 빼지 않는다.
 
 ---
 
@@ -33,10 +71,10 @@ Peter Lynch가 고안한 지표. 성장성을 감안한 밸류에이션으로, �
 
 | 컬럼 | 출처 | 설명 |
 |------|------|------|
-| `{YYYY}_PER(배)` | snapshot | 주가수익비율 |
-| `{YYYY}_EPS(원)` 또는 `{YYYY}_EPS` | invest_idx | 주당순이익 절대값 (4개년) |
-| `{YYYY}(누적)_EPS증가율` | ratio | EPS 증가율 (fallback) |
-| `{YYYY}(누적)_부채비율` | ratio | 재무 안정성 필터 |
+| `{YYYY}_PER(배)` | dart_ratio | 주가수익비율 (최근 거래일 종가 기준) |
+| `{YYYY}_EPS(원)` | dart_ratio | 주당순이익 절대값 (4개년) |
+| `{YYYY}(누적)_EPS증가율` | dart_ratio | EPS 증가율 (fallback) |
+| `{YYYY}(누적)_부채비율` | dart_ratio | 재무 안정성 필터 |
 
 ### 파라미터 (STRATEGY_CONFIG["peg"])
 
@@ -84,7 +122,7 @@ Joseph Piotroski (2000, Journal of Accounting Research) 제안.
 |------|------|----------|
 | F5 | 부채비율 전년 대비 감소 | 재무 구조 개선 |
 | F6 | 유동비율 전년 대비 증가 | 단기 유동성 개선 |
-| F7 | 신주 발행 없음 | (데이터 미제공 → 항상 0 처리) |
+| F7 | 신주 발행 없음 | (항상 0 처리 → 실제 최고점은 8점. 유상증자 종목은 가치함정 필터가 따로 제외) |
 
 **운영 효율성 (2점)**
 | 항목 | 기준 | 측정 의미 |
@@ -96,13 +134,13 @@ Joseph Piotroski (2000, Journal of Accounting Research) 제안.
 
 | 컬럼 | 출처 |
 |------|------|
-| `{YYYY}(누적)_ROA` (현재/전년) | ratio |
-| `{YYYY}(누적)_부채비율` (현재/전년) | ratio |
-| `{YYYY}(누적)_유동비율` (현재/전년) | ratio |
-| `{YYYY}(누적)_영업이익률` (현재/전년) | ratio |
-| `{YYYY}(누적)_총자산회전율` (현재/전년) | ratio |
-| `{YYYY}(연간)_영업활동현금흐름` | finance |
-| `{YYYY}(연간)_당기순이익` | finance |
+| `{YYYY}(누적)_ROA` (현재/전년) | dart_ratio |
+| `{YYYY}(누적)_부채비율` (현재/전년) | dart_ratio |
+| `{YYYY}(누적)_유동비율` (현재/전년) | dart_ratio |
+| `{YYYY}(누적)_영업이익률` (현재/전년) | dart_ratio |
+| `{YYYY}(누적)_총자산회전율` (현재/전년) | dart_ratio |
+| `{YYYY}(연간)_영업활동현금흐름` | dart_finance |
+| `{YYYY}(연간)_당기순이익` | dart_finance |
 
 ### 파라미터 (STRATEGY_CONFIG["piotroski"])
 
@@ -117,9 +155,11 @@ Joseph Piotroski (2000, Journal of Accounting Research) 제안.
 
 ---
 
-## 3. Greenblatt Magic Formula
+## 3. Greenblatt Magic Formula (현재 제외)
 
 **파일:** `strat_greenblatt.py`
+
+> 2026-11부터 종목 선정에서 제외(`enabled = False`). DART 기준 EV/EBITDA에 필요한 감가상각비가 일반 기업의 55%(시총 500억 미만은 27%)에만 있어 소형주가 후보에서 빠지기 때문이다. 다시 쓰려면 `enabled = True`, 필요하면 `ev_metric = "EV/EBIT"`.
 
 ### 이론
 
@@ -142,17 +182,18 @@ Joel Greenblatt "The Little Book That Beats the Market" (2005).
 
 | 컬럼 | 출처 |
 |------|------|
-| `{YYYY}_EV/EBITDA` | invest_idx |
-| `{YYYY}(누적)_ROIC` | ratio |
-| `{YYYY}(누적)_부채비율` | ratio |
+| `{YYYY}_EV/EBITDA` 또는 `{YYYY}_EV/EBIT` | dart_ratio |
+| `{YYYY}(누적)_ROIC` | dart_ratio |
+| `{YYYY}(누적)_부채비율` | dart_ratio |
 
 ### 파라미터 (STRATEGY_CONFIG["greenblatt"])
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `enabled` | `true` | 전략 활성화 여부 |
+| `enabled` | `false` | 전략 활성화 여부 |
 | `max_debt_ratio` | `150.0` | 부채비율 상한 (%) |
 | `top_n` | `30` | 선정 종목 수 |
+| `ev_metric` | `EV/EBITDA` | 수익수익률에 쓰는 배수 (`EV/EBIT` 가능, 환경변수 `NFAV_GREENBLATT_EV`) |
 
 ### 출력 컬럼
 
@@ -271,10 +312,11 @@ NFAV_B  = 금융자산 − 이자부부채                    (재무구조 · �
 | Piotroski | 0.25 |
 | Greenblatt | 0.25 |
 | 멀티팩터 | 0.20 |
-| NCAV | 0.05 |
-| NFAV | 0.05 |
+| NCAV | 0.10 |
+| NFAV | 0.05 (설정에 없어 코드 기본값) |
 
-1개 이상 전략에 포함된 종목만 최종 리스트에 등재.
+1개 이상 전략에 포함된 종목만 최종 리스트에 등재. Greenblatt는 제외 중이라 점수가 없다.
+가중치 합으로 나누지 않으므로, 여러 전략을 동시에 통과한 종목일수록 종합점수가 높아진다.
 
 ---
 

@@ -53,6 +53,10 @@ DATA_CONFIG = {
     "dart_balance_file": "derived/dart_balance_*.xlsx",
     "market_cap_file": "derived/market_cap_2*.xlsx",   # KRX (market_cap_kb_* 는 제외)
 
+    # 가치함정 점검 자료 (python apiCollect.py dart_risk → derived/dart_risk_YYYY_MM.xlsx) — 가장 최근 파일 사용
+    #   감사의견, 최근 1년 CB·BW·유상증자·감자·부실 공시. 파일이 없으면 가치함정 필터를 건너뛴다
+    "dart_risk_file": "derived/dart_risk_2*.xlsx",
+
     # 업종 분류 (python sectorCollect.py → derived/sector_map_YYYY_MM_DD.xlsx) — 가장 최근 파일 사용
     #   종목코드로 붙여 WI26분야 옆에 KRICS섹터·KRICS산업그룹 컬럼을 더한다. 파일이 없으면 건너뛴다
     "sector_map_file": "derived/sector_map_2*.xlsx",
@@ -155,4 +159,19 @@ COMMON_FILTERS = {
     "exclude_spac": True,          # SPAC(기업인수목적회사) 제외
     "exclude_no_trade": True,      # KRX 기준일 거래량 0 종목(거래정지 등) 제외
     "min_trading_value_억": 0,     # 기준일 최소 거래대금(억원), 0이면 사용 안 함
+
+    # --- 가치함정 필터 (2026-11-25) — 모든 전략에 앞서 적용. 자료: python apiCollect.py dart_risk ---
+    #   제외된 종목과 사유는 결과 파일의 '가치함정_제외' 시트에 남는다
+    "value_trap": {
+        "enabled": True,
+        "exclude_bad_audit": True,          # 최근 사업보고서 감사의견이 한정·부적정·의견거절
+        "exclude_going_concern": True,      # 감사보고서 강조사항에 계속기업 불확실성
+        "exclude_cb_bw": True,              # 최근 1년 전환사채(CB)·신주인수권부사채(BW) 발행 결정
+        "exclude_rights_offering": True,    # 최근 1년 유상증자 결정 (주주배정·제3자배정·일반공모 모두)
+        "exclude_distress": True,           # 회생절차·해산사유·영업정지·부도·채권은행 관리절차 공시
+        "exclude_eb": False,                # 교환사채(EB) — 자기주식·타사 주식이 대상이라 희석이 없을 수 있어 표시만
+        "exclude_capital_reduction": False, # 감자 — 무상감자(결손 보전)와 유상감자(주주환원)가 섞여 있어 표시만
+        # CB·BW·유상증자 금액 합계가 시가총액의 이 비율(%) 미만이면 발행 사유로는 빼지 않는다. 0 = 금액과 관계없이 뺀다
+        "min_issue_to_cap_pct": 0,
+    },
 }
