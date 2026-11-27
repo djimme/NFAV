@@ -167,7 +167,19 @@ COMMON_FILTERS = {
         "exclude_bad_audit": True,          # 최근 사업보고서 감사의견이 한정·부적정·의견거절
         "exclude_going_concern": True,      # 감사보고서 강조사항에 계속기업 불확실성
         "exclude_cb_bw": True,              # 최근 1년 전환사채(CB)·신주인수권부사채(BW) 발행 결정
-        "exclude_rights_offering": True,    # 최근 1년 유상증자 결정 (주주배정·제3자배정·일반공모 모두)
+        "exclude_rights_offering": True,    # 최근 1년 유상증자 결정 — 아래 rights_offering_mode 에 따라 판단
+        # 유상증자 판단 방식 (2026-11-27): "judge" = 상황을 보고 판단, "all" = 한 건이라도 있으면 제외
+        #   judge 순서: ① 반복 조달(CB·BW 동반 또는 2건 이상. 합계 증자비율이 small 미만이면 반복 아님) → 제외
+        #               ② loss_years 해 연속 영업적자 → 제외
+        #               ③ 증자비율 large 이상이고 성장 목적 비중이 growth_min 미만 → 제외
+        #               ④ 주주배정·일반공모이고 증자비율 small 이상, 성장 목적 비중이 growth_min 미만 → 제외
+        #               ⑤ 증자비율 small 미만 → 통과  ⑥ 성장 목적 비중 growth_min 이상 → 통과(주의)  ⑦ 나머지 → 통과(주의)
+        #   성장 목적 = 시설자금 + 영업양수자금 + 타법인 증권 취득자금. 통과 종목은 결과 파일 '유상증자_통과' 시트에 남는다
+        "rights_offering_mode": "judge",
+        "rights_small_pct": 10,             # 증자비율(신주 수 ÷ 증자 전 주식 수, %)이 이 값 미만이면 소규모
+        "rights_large_pct": 30,             # 이 값 이상이면 대규모
+        "rights_growth_min_pct": 50,        # 성장 목적 비중(%)이 이 값 이상이면 성장 목적 증자로 본다
+        "rights_loss_years": 3,             # 연속 영업적자 햇수 기준
         "exclude_distress": True,           # 회생절차·해산사유·영업정지·부도·채권은행 관리절차 공시
         "exclude_eb": False,                # 교환사채(EB) — 자기주식·타사 주식이 대상이라 희석이 없을 수 있어 표시만
         "exclude_capital_reduction": False, # 감자 — 무상감자(결손 보전)와 유상감자(주주환원)가 섞여 있어 표시만

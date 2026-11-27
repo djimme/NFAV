@@ -13,7 +13,8 @@
 import numpy as np
 import pandas as pd
 
-from strat_utils import load_all_data, merge_base, apply_common_filters, apply_value_trap_filter
+from strat_utils import (load_all_data, merge_base, apply_common_filters, apply_value_trap_filter,
+                         rights_offering_passed)
 from strat_peg import strategy_peg
 from strat_piotroski import strategy_piotroski
 from strat_greenblatt import strategy_greenblatt
@@ -113,6 +114,7 @@ def run_all_strategies(config: dict, strategy_cfg: dict, composite_weights: dict
             'nfav': DataFrame,
             'composite': DataFrame,  # 종합 랭킹
             'value_trap': DataFrame, # 가치함정 필터로 제외한 종목과 사유
+            'rights_pass': DataFrame, # 최근 1년 유상증자가 있지만 통과한 종목과 판정
         }
     """
     print("\n" + "="*60)
@@ -126,7 +128,7 @@ def run_all_strategies(config: dict, strategy_cfg: dict, composite_weights: dict
     # 가치함정 필터: 감사의견 비적정, 최근 1년 CB·BW·유상증자, 부실 공시 종목을 모든 전략에서 뺀다
     base, trap_excluded = apply_value_trap_filter(base, common_filter_cfg.get("value_trap", {}))
 
-    results = {"value_trap": trap_excluded}
+    results = {"value_trap": trap_excluded, "rights_pass": rights_offering_passed(base)}
 
     # 2. 각 전략 실행
     print("\n[1/5] PEG 전략 (Peter Lynch)")

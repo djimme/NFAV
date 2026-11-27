@@ -11,6 +11,7 @@ strat_utils.apply_value_trap_filter 가 이 파일의 결과(derived/dart_risk_Y
                감자 결정, 부실 관련 공시(회생절차·해산사유·영업정지·부도·채권은행 관리절차 등)
                API list (공시검색, 공시유형 B=주요사항보고) — 종목별이 아니라 달 단위로 전체를 받아 한 번에 색인한다
   발행 금액  : 위에서 걸린 종목만 상세 API(cvbdIsDecsn·bdwtIsDecsn·piicDecsn)로 권면총액·조달금액·증자방식 조회
+               유상증자는 증자비율(신주 수 ÷ 증자 전 주식 수)과 성장 목적 비중(시설·영업양수·타법인 증권 취득)도 구한다
 
 캐시: derived/dart_cache/
   {corp}_{year}_11011_audit.json   감사의견
@@ -44,6 +45,7 @@ EVENT_KEYS = {
 DETAIL_API = {'CB': 'cvbdIsDecsn', 'BW': 'bdwtIsDecsn', '유상증자': 'piicDecsn'}
 # 유상증자 자금조달 목적별 금액 필드 (시설·영업양수·운영·채무상환·타법인증권취득·기타)
 _PIIC_FUND = ('fdpp_fclt', 'fdpp_bsninh', 'fdpp_op', 'fdpp_dtrp', 'fdpp_ocsa', 'fdpp_etc')
+_PIIC_GROWTH = ('fdpp_fclt', 'fdpp_bsninh', 'fdpp_ocsa')     # 성장 목적: 시설·영업양수·타법인 증권 취득
 
 _LOCK = threading.Lock()
 _EVENTS = None       # {corp_code: {항목: [(접수일, 보고서명), ...]}}
@@ -173,8 +175,22 @@ def _won(v):
         return 0.0
 
 
+def _cnt(v):
+    try:
+        return float(str(v).replace(',', ''))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def fetch_detail(corp, kind):
-    """CB·BW·유상증자 결정 상세 → (금액 합계 억원, 방식 문자열). 같은 결정의 정정은 접수번호가 달라도 한 건으로 온다."""
+    """
+    CB·BW·유상증자 결정 상세 → (금액 합계 억원, 방식 문자열, 증자비율 %, 성장 목적 비중 %).
+    같은 결정의 정정은 접수번호가 달라도 한 건으로 온다. 뒤의 두 값은 유상증자에만 있다(없으면 None).
+
+    증자비율      : 결정마다 (신주 수 ÷ 증자 전 발행주식총수)를 구해 더한 값. 보통주·기타주식을 합친다
+    성장 목적 비중 : 조달금액 가운데 시설자금·영업양수자금·타법인 증권 취득자금이 차지하는 비율
+                    (나머지는 운영자금·채무상환자금·기타자금)
+    """
     bgn, end = _WINDOW
     path = os.path.join(CACHE_DIR, f'{corp}_{DETAIL_API[kind]}_{end[:6]}.json')     # 달 단위로 한 번만 받는다
     j = _cached(path, lambda: _get(DETAIL_API[kind], corp_code=corp, bgn_de=bgn, end_de=end))
@@ -182,8 +198,15 @@ def fetch_detail(corp, kind):
     if kind == '유상증자':
         amt = sum(sum(_won(r.get(f)) for f in _PIIC_FUND) for r in rows)
         how = ' | '.join(dict.fromkeys((r.get('ic_mthn') or '').strip() for r in rows if r.get('ic_mthn')))
-        return amt, how
-    return sum(_won(r.get('bd_fta')) for r in rows), ''
+        ratio, known = 0.0, False
+        for r in rows:
+            new = _cnt(r.get('nstk_ostk_cnt')) + _cnt(r.get('nstk_estk_cnt'))
+            old = _cnt(r.get('bfic_tisstk_ostk')) + _cnt(r.get('bfic_tisstk_estk'))
+            if new > 0 and old > 0:
+                ratio, known = ratio + new / old * 100, True
+        growth = sum(sum(_won(r.get(f)) for f in _PIIC_GROWTH) for r in rows)
+        return amt, how, (ratio if known else None), (growth / amt * 100 if amt else None)
+    return sum(_won(r.get('bd_fta')) for r in rows), '', None, None
 
 
 # ── 종목 단위 수집 ─────────────────────────────────────────────────────────
@@ -202,10 +225,12 @@ def collectRisk(code, name=None, industry=None):
         d[f'{k}_건수'] = len(originals) or (1 if items else 0)
         d[f'{k}_최근일'] = max(x[0] for x in items) if items else None
     for k in DETAIL_API:
-        amt, how = fetch_detail(corp, k) if events.get(k) else (0.0, '')
+        amt, how, ratio, growth = fetch_detail(corp, k) if events.get(k) else (0.0, '', None, None)
         d[f'{k}_금액_억원'] = round(amt, 1) if amt else None
         if k == '유상증자':
             d['유상증자_방식'] = how or None
+            d['유상증자_증자비율'] = round(ratio, 1) if ratio is not None else None
+            d['유상증자_성장목적_비중'] = round(growth, 1) if growth is not None else None
     d['부실_공시'] = ' | '.join(dict.fromkeys(re.sub(r'^.*\((.*)\)\s*$', r'\1', x[1]) for x in events.get('부실', []))) or None
     d['조회기간'] = f'{_WINDOW[0]}~{_WINDOW[1]}'
     return d

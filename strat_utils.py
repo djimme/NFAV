@@ -154,7 +154,36 @@ SECTOR_MAP_COLS = ["KRICS섹터", "KRICS산업그룹"]
 DART_RISK_COLS = ["감사의견", "감사의견_판정", "감사_사업연도", "계속기업_불확실성",
                   "CB_건수", "CB_최근일", "CB_금액_억원", "BW_건수", "BW_최근일", "BW_금액_억원",
                   "EB_건수", "EB_최근일", "유상증자_건수", "유상증자_최근일", "유상증자_금액_억원", "유상증자_방식",
+                  "유상증자_증자비율", "유상증자_성장목적_비중",
                   "감자_건수", "감자_최근일", "부실_공시", "조회기간"]
+
+
+def _operating_loss_streak(fin: pd.DataFrame) -> pd.DataFrame:
+    """
+    finance 의 '{연도}(연간)_영업이익' 열로 종목별 연속 영업적자 햇수를 센다 → ['종목코드', '위험_영업적자_연속연수'].
+    값이 있는 가장 최근 연도부터 거슬러 올라가며 적자가 끊기는 곳까지 센다. 영업이익 자료가 없으면 빈 값.
+    """
+    cols = sorted((c for c in fin.columns if re.match(r"^\d{4}\(연간\)_영업이익$", c)), reverse=True)
+    f = fin.drop_duplicates("종목코드")
+    out = pd.DataFrame({"종목코드": f["종목코드"].values})
+    if not cols:
+        out["위험_영업적자_연속연수"] = np.nan
+        return out
+    vals = f[cols].apply(pd.to_numeric, errors="coerce").to_numpy()
+    streak = []
+    for row in vals:
+        row = row[~np.isnan(row)]
+        if len(row) == 0:
+            streak.append(np.nan)
+            continue
+        n = 0
+        for v in row:
+            if v >= 0:
+                break
+            n += 1
+        streak.append(n)
+    out["위험_영업적자_연속연수"] = streak
+    return out
 
 
 def merge_base(data: dict) -> pd.DataFrame:
@@ -221,6 +250,8 @@ def merge_base(data: dict) -> pd.DataFrame:
         cols = [c for c in DART_RISK_COLS if c in rk.columns]
         rk = rk.drop_duplicates("종목코드")[["종목코드"] + cols].rename(columns={c: f"위험_{c}" for c in cols})
         base = base.merge(rk, on="종목코드", how="left")
+        # 유상증자 판단에 쓰는 연속 영업적자 햇수 (최근 연간 영업이익부터 거슬러 올라가며 센다)
+        base = base.merge(_operating_loss_streak(fin), on="종목코드", how="left")
 
     # DART 재무비율·주당 지표 (ratio_source = "dart" 일 때만)
     if "dart_ratio" in data:
@@ -351,7 +382,9 @@ def apply_value_trap_filter(df: pd.DataFrame, cfg: dict) -> tuple:
       계속기업 불확실성   감사보고서 강조사항에 '계속기업' 언급
       CB·BW 발행         최근 1년 안에 전환사채·신주인수권부사채 발행 결정
       EB 발행            최근 1년 안에 교환사채 발행 결정 (기본은 표시만)
-      유상증자           최근 1년 안에 유상증자 결정
+      유상증자           최근 1년 안에 유상증자 결정 — rights_offering_mode 가 "judge"(기본)면 반복 조달·연속 영업적자·
+                         규모·자금 목적·방식을 보고 판단하고(_judge_rights_offering), "all" 이면 한 건이라도 있으면 뺀다.
+                         통과한 종목에는 '유상증자_판정' 열(통과: 소규모 / 주의: …)이 남는다
       감자               최근 1년 안에 감자 결정 (기본은 표시만)
       부실 공시           회생절차·해산사유·영업정지·부도·채권은행 관리절차 등
 
@@ -386,12 +419,23 @@ def apply_value_trap_filter(df: pd.DataFrame, cfg: dict) -> tuple:
         cb_bw &= ~small
         rights &= ~small
 
+    # 유상증자: 'judge' 면 상황을 보고 판단하고(_judge_rights_offering), 'all' 이면 한 건이라도 있으면 뺀다
+    df = df.copy()
+    rights_label = "유상증자"
+    if cfg.get("rights_offering_mode", "judge") == "judge" and "위험_유상증자_증자비율" in df.columns:
+        verdict = _judge_rights_offering(df, cfg, rights, cb_bw_any=(num("위험_CB_건수") + num("위험_BW_건수")) > 0)
+        df["유상증자_판정"] = verdict
+        rights = verdict.str.startswith("제외")
+        rights_label = None      # 사유를 판정 문구로 적는다
+    elif cfg.get("rights_offering_mode", "judge") == "judge":
+        print("  ⚠️ 유상증자 판단: 점검 자료에 증자비율이 없어 모두 제외로 처리 → python apiCollect.py dart_risk refresh")
+
     rules = [
         ("exclude_bad_audit", True, "감사의견 비적정", df["위험_감사의견_판정"].astype(str) == "비적정"),
         ("exclude_going_concern", True, "계속기업 불확실성", flag("위험_계속기업_불확실성")),
         ("exclude_cb_bw", True, "CB·BW 발행", cb_bw),
         ("exclude_eb", False, "EB 발행", num("위험_EB_건수") > 0),
-        ("exclude_rights_offering", True, "유상증자", rights),
+        ("exclude_rights_offering", True, rights_label, rights),
         ("exclude_capital_reduction", False, "감자", num("위험_감자_건수") > 0),
         ("exclude_distress", True, "부실 공시",
          df["위험_부실_공시"].notna() & (df["위험_부실_공시"].astype(str).str.strip() != "")
@@ -403,8 +447,10 @@ def apply_value_trap_filter(df: pd.DataFrame, cfg: dict) -> tuple:
         if not cfg.get(key, default):
             continue
         mask = mask.fillna(False)
-        reason[mask] = reason[mask].where(reason[mask] == "", reason[mask] + ", ") + label
-        counts.append(f"{label} {int(mask.sum())}")
+        # 유상증자를 판단 방식으로 걸렀으면 사유를 '유상증자(반복 조달)' 처럼 판정 문구로 적는다
+        text = label if label else df.loc[mask, "유상증자_판정"].str.replace("제외: ", "유상증자(", regex=False) + ")"
+        reason[mask] = reason[mask].where(reason[mask] == "", reason[mask] + ", ") + text
+        counts.append(f"{label or '유상증자'} {int(mask.sum())}")
     out = reason != ""
     excluded = df[out].copy()
     excluded.insert(0, "제외사유", reason[out])
@@ -412,7 +458,71 @@ def apply_value_trap_filter(df: pd.DataFrame, cfg: dict) -> tuple:
            [c for c in df.columns if c.startswith("위험_")]
     excluded = excluded[[c for c in keep if c in excluded.columns]].sort_values("제외사유").reset_index(drop=True)
     print(f"  🔍 가치함정 필터: {len(df)}개 → {len(df) - int(out.sum())}개 (제외 {int(out.sum())}개 — {' · '.join(counts)})")
+    if "유상증자_판정" in df.columns:
+        v = df.loc[~out, "유상증자_판정"]
+        v = v[v != ""].value_counts()
+        if len(v):
+            print("     유상증자가 있지만 통과: " + " · ".join(f"{k} {n}" for k, n in v.items()))
     return df[~out], excluded
+
+
+def rights_offering_passed(df: pd.DataFrame) -> pd.DataFrame:
+    """가치함정 필터를 통과한 종목 가운데 최근 1년 유상증자가 있는 종목과 판정 (결과 파일의 '유상증자_통과' 시트)."""
+    if "유상증자_판정" not in df.columns:
+        return pd.DataFrame()
+    keep = ["유상증자_판정", "종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "시가총액_억원",
+            "위험_유상증자_건수", "위험_유상증자_최근일", "위험_유상증자_금액_억원", "위험_유상증자_방식",
+            "위험_유상증자_증자비율", "위험_유상증자_성장목적_비중", "위험_영업적자_연속연수"]
+    out = df[df["유상증자_판정"] != ""]
+    return out[[c for c in keep if c in out.columns]].sort_values(["유상증자_판정", "종목코드"]).reset_index(drop=True)
+
+
+def _judge_rights_offering(df: pd.DataFrame, cfg: dict, rights: pd.Series, cb_bw_any: pd.Series) -> pd.Series:
+    """
+    최근 1년 유상증자가 있는 종목을 상황에 따라 판정한다 (2026-11-27. 근거: docs/종목 선정 전략 설명.html).
+    위에서부터 차례로 보고 처음 걸리는 판정을 쓴다. 유상증자가 없는 종목은 빈 문자열.
+
+      1 제외: 반복 조달              CB·BW도 발행했거나 유상증자가 2건 이상. 단, 합계 증자비율이 small 미만이면 반복으로 보지 않는다
+      2 제외: N년 연속 영업적자       최근 연간 영업이익이 loss_years 해 연속 적자
+      3 제외: 대규모·비성장 목적      증자비율 large 이상이고 성장 목적(시설·영업양수·타법인 증권) 비중이 growth 미만
+      4 제외: 공모·비성장 목적        주주배정·일반공모(제3자배정 없음)이고 증자비율 small 이상, 성장 목적 비중이 growth 미만
+      5 통과: 소규모                 증자비율 small 미만
+      6 주의: 성장 목적               성장 목적 비중이 growth 이상
+      7 주의: 운영자금 등 / 주의: 자료 없음   나머지 (증자비율을 모르면 '자료 없음')
+
+    기준값(cfg): rights_small_pct 10, rights_large_pct 30, rights_growth_min_pct 50, rights_loss_years 3
+    """
+    small = cfg.get("rights_small_pct", 10)
+    large = cfg.get("rights_large_pct", 30)
+    growth_min = cfg.get("rights_growth_min_pct", 50)
+    loss_years = cfg.get("rights_loss_years", 3)
+
+    def col(c):
+        return pd.to_numeric(df[c], errors="coerce") if c in df.columns else pd.Series(np.nan, index=df.index)
+
+    ratio = col("위험_유상증자_증자비율")                 # 모르면 NaN → 크기 비교는 모두 False
+    growth = col("위험_유상증자_성장목적_비중") >= growth_min
+    count = col("위험_유상증자_건수").fillna(0)
+    how = df["위험_유상증자_방식"].fillna("").astype(str) if "위험_유상증자_방식" in df.columns \
+        else pd.Series("", index=df.index)
+    public_only = how.str.contains("주주배정|일반공모|주주우선") & ~how.str.contains("제3자")
+    is_small = ratio < small
+
+    steps = [
+        ("제외: 반복 조달", (cb_bw_any | (count >= 2)) & ~is_small),
+        (f"제외: {loss_years}년 연속 영업적자", col("위험_영업적자_연속연수") >= loss_years),
+        ("제외: 대규모·비성장 목적", (ratio >= large) & ~growth),
+        ("제외: 공모·비성장 목적", public_only & (ratio >= small) & ~growth),
+        ("통과: 소규모", is_small),
+        ("주의: 성장 목적", growth),
+        ("주의: 자료 없음", ratio.isna()),
+        ("주의: 운영자금 등", pd.Series(True, index=df.index)),
+    ]
+    verdict = pd.Series("", index=df.index)
+    for label, mask in steps:
+        hit = rights & (verdict == "") & mask.fillna(False)
+        verdict[hit] = label
+    return verdict
 
 
 # =============================================================================
