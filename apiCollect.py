@@ -11,6 +11,8 @@
                   (전략 공통 필터 COMMON_FILTERS["value_trap"] 이 이 파일을 읽는다. 분기에 한 번 이상 갱신)
   krx_marketcap - KRX Open API 전 종목 시가총액·종가·상장주식수 (기본) → derived/market_cap_YYYY_MM_DD.xlsx
                   (시장별 1회 호출로 전 종목. 파일명의 날짜는 KRX 기준 거래일)
+  factor        - 멀티팩터 전략용 팩터 점수(수익건전성·성장성·밸류·모멘텀·변동성)를 DART·KRX 값으로 계산
+                  → derived/factor_YYYY_MM.xlsx (dart_ratio 파일 + KRX 월말 종가 13개월. 먼저 dart_ratio 를 실행할 것)
   kb_marketcap  - KB증권 종목기업개요 시가총액·PER·PBR (대체 소스, 종목별 호출) → derived/market_cap_kb_YYYY_MM_DD.xlsx
 
 사용:
@@ -67,6 +69,11 @@ MODULE_CONFIG = {
         'output': None,  # KRX 기준 거래일로 파일명을 정한다
         'bulk': True,
     },
+    'factor': {
+        'description': '팩터 점수 직접 계산 (dart_ratio 파일 + KRX 월말 종가)',
+        'output': lambda now: f'derived/factor_{now:%Y_%m}.xlsx',
+        'bulk': True,
+    },
     'kb_marketcap': {
         'description': 'KB증권 시가총액 (IVM10050, 대체 소스)',
         'output': lambda now: f'derived/market_cap_kb_{now:%Y_%m_%d}.xlsx',
@@ -106,6 +113,9 @@ def latest_corp_list():
 
 def collect_bulk(module, codes=None):
     """전 종목을 한 번에 주는 소스(KRX). 종목 리스트(corplist)에 있는 종목만 남긴다."""
+    if module == 'factor':
+        from krxFactor import collectFactorAll
+        return collectFactorAll(codes)
     from krxMarketCap import collectMarketCapAll
     df = collectMarketCapAll()
     base = latest_corp_list()

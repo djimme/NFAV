@@ -1,17 +1,19 @@
 # strat_multifactor.py
-# 멀티팩터 스코어링 전략 (FnGuide 팩터 Z-Score 활용)
+# 멀티팩터 스코어링 전략 (팩터 표준점수 가중 합산)
 #
 # 이론:
 #   단일 팩터 전략보다 여러 팩터를 결합할 때 리스크 조정 수익률이 안정적
 #   (Fama-French, AQR 등 학술 연구 기반).
-#   FnGuide가 제공하는 팩터별 Z-Score를 가중 합산해 종합 점수 산출.
+#   팩터별 표준점수를 가중 합산해 종합 점수 산출.
 #
-# 사용 팩터 (FnGuide 투자지표 — 종목 기준):
-#   수익건전성_종목 (↑): 이익의 안정성·지속성 (ROE, ROA 변동성 등)
-#   성장성_종목     (↑): 매출/이익 성장성
-#   밸류_종목       (↑): 저평가 정도 (PBR, PER, PSR 등 역수 합산)
-#   모멘텀_종목     (↑): 과거 가격 모멘텀 (3~12개월)
-#   변동성_종목     (↓): 낮을수록 안정적 (가중치 음수)
+# 팩터 점수 출처 (agent_config.DATA_CONFIG["factor_source"]):
+#   "dart"(기본)  DART·KRX 값으로 직접 계산 — python apiCollect.py factor (정의: krxFactor.py)
+#     수익건전성_종목 (↑): ROE · ROA · 영업이익률
+#     성장성_종목     (↑): 매출증가율 · EPS증가율
+#     밸류_종목       (↑): E/P · B/P
+#     모멘텀_종목     (↑): 12-1개월 수익률
+#     변동성_종목     (↓): 월간 수익률 표준편차 (가중치 음수)
+#   "fnguide"     FnGuide invest_idx 의 팩터 점수 (FnGuide 자체 모델, 산식 비공개)
 #
 # 가중치 (STRATEGY_CONFIG["multifactor"]["weights"] 참조):
 #   수익건전성 0.25 / 성장성 0.25 / 밸류 0.20 / 모멘텀 0.15 / 변동성 -0.15
@@ -24,7 +26,7 @@ from strat_utils import _normalize
 
 def strategy_multifactor(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
-    FnGuide에서 제공하는 팩터 점수(Z-score)를 가중 합산해 종합 점수를 산출합니다.
+    팩터 점수(표준점수)를 가중 합산해 종합 점수를 산출합니다. (점수 출처는 파일 머리말 참고)
 
     팩터 (종목 기준):
         수익건전성_종목 (↑) : 이익의 안정성/지속성
@@ -68,7 +70,7 @@ def strategy_multifactor(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     result = result.nlargest(top_n, "멀티팩터_점수")
     result["멀티팩터_점수"] = _normalize(result["멀티팩터_점수"])
 
-    output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "KRICS산업그룹"] + factor_cols + ["멀티팩터_점수"]
+    output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "KRICS산업그룹"] + factor_cols + ["멀티팩터_점수", "팩터_출처"]
     output_cols = [c for c in output_cols if c in result.columns]
 
     print(f"  📊 멀티팩터 전략: {len(result)}개 종목 선정")

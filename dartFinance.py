@@ -7,7 +7,7 @@ OpenDART 재무제표 수집 및 파싱 (1층 원천 데이터)
   유동자산, 부채총계, 자본총계, 비지배지분
   현금및현금성자산, 유동금융자산, 장기금융자산      → NFAV 금융자산
   유동금융자산_기타, 장기금융자산_기타              → 그중 계정명에 '기타'가 붙은 금액 (대여금 등 성격이 섞일 수 있음)
-  이자부부채(차입금·사채·유동성장기부채·리스부채), 그중 리스부채 → NFAV B
+  이자부부채(차입금·차입부채·사채·유동성장기부채·리스부채, '단기금융부채'처럼 묶어 공시한 금융부채), 그중 리스부채 → NFAV B
   당기순이익(누적) — 해당 보고서의 연초 누적값
   메타: 기준기간, 보고서코드, 사업연도, 연결구분(CFS/OFS), 접수번호, 유동구분여부
 
@@ -24,6 +24,7 @@ import datetime as dt
 import io
 import json
 import os
+import re
 import time
 import zipfile
 import xml.etree.ElementTree as ET
@@ -35,7 +36,13 @@ from fin_utils import get_env
 CACHE_DIR = os.path.join('derived', 'dart_cache')
 API = 'https://opendart.fss.or.kr/api'
 REPRT_NAME = {'11013': '1Q', '11012': '2Q', '11014': '3Q', '11011': '4Q'}
-DEBT_KEYS = ('차입금', '사채', '유동성장기부채', '리스부채')
+# 이자부부채로 보는 계정 이름 (부채 구간에서 이름에 이 말이 들어간 계정)
+#   2026-11-28: '차입부채'(단기차입부채·장기차입부채 등), 유동화채무, 유동성장기채무, 리스유동부채 계열을 더했다
+DEBT_KEYS = ('차입금', '차입부채', '사채', '유동성장기부채', '유동성장기채무', '유동장기부채', '유동화채무',
+             '리스부채', '리스유동부채', '리스비유동부채')
+# 차입금·사채를 '금융부채' 한 줄로 묶어 공시하는 회사 (예: GS건설 단기금융부채·장기금융부채).
+#   이름이 딱 이 꼴일 때만 이자부부채로 본다. 기타금융부채·파생금융부채·당기손익인식금융부채 등은 넣지 않는다
+_PLAIN_FIN_DEBT = re.compile(r'^(유동성?|비유동|단기|장기)?금융부채$')
 _CORP_MAP = None
 
 
@@ -154,7 +161,8 @@ def parseBalance(rows):
             if '기타' in nm:  # 기타유동금융자산, 기타 비유동 금융자산 등
                 d['유동금융자산_기타' if sec == 'ca' else '장기금융자산_기타'] += v
             fin_used.append(f"{'유동' if sec == 'ca' else '비유동'}:{nm}")
-        elif sec in ('cl', 'ncl') and any(k in nm for k in DEBT_KEYS) and '금융부채' not in nm:
+        elif sec in ('cl', 'ncl') and ((any(k in nm for k in DEBT_KEYS) and '금융부채' not in nm)
+                                       or _PLAIN_FIN_DEBT.match(nm.replace(' ', ''))):
             d['이자부부채'] += v
             if '리스' in nm:
                 d['리스부채'] += v

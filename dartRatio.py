@@ -228,7 +228,10 @@ def _split_factor(listed_then, listed_now, sh):
 
     KRX 상장주식수(보통주)의 결산월 말 대비 최근 배수가 딱 떨어지는 값(2배, 1/10 등)이거나
     무상증자 배수(자기주식에는 배정하지 않으므로 1 + k × (1 − 자기주식 비율))와 같을 때만 조정한다.
-    유상증자·전환 등 그 밖의 증감은 조정하지 않는다.
+    위 두 경우가 아니어도 주식수가 15% 이상 늘거나 13% 이상 줄었으면(분할·병합이 겹쳤거나 무상증자 뒤 소각이
+    이어진 경우 등) 그 배수 그대로 조정한다 — 현재 주가와 견줄 수 있게 현재 주식수 기준 주당 값으로 맞춘다.
+    (큰 유상증자·전환도 여기에 걸린다. 이때는 새로 들어온 자본이 반영되지 않아 EPS·BPS가 보수적으로 낮게 나온다)
+    그보다 작은 증감(소규모 유상증자·전환·소각)은 조정하지 않는다.
     """
     if not listed_then or not listed_now:
         return 1.0
@@ -241,6 +244,8 @@ def _split_factor(listed_then, listed_now, sh):
             rr = 1 + k * (1 - sh['자사'] / sh['총'])
             if abs(r / rr - 1) <= 0.003:
                 return rr
+    if r >= 1.15 or r <= 0.87:
+        return r
     return 1.0
 
 
@@ -362,7 +367,7 @@ def collectRatio(code, name=None, industry=None, today=None):
                 sh = shares[y] = {'총': listed, '자사': 0}
             f = _split_factor(listed, listed_now, sh)
             if f != 1:
-                notes.append(f'{y} 주당 지표를 결산 후 주식수 변화({f:.2f}배: 분할·병합·무상증자 추정)에 맞춰 조정')
+                notes.append(f'{y} 주당 지표를 결산 후 주식수 변화({f:.2f}배: 분할·병합·증자 등)에 맞춰 조정')
             eps0 = _div(ni_ctrl * avg_r if ni_ctrl is not None else None, sh['총'])
             bps0 = _div(eq_ctrl * end_r if eq_ctrl is not None else None, sh['총'] - sh['자사'])
             eps, bps = (eps0 / f if eps0 is not None else None), (bps0 / f if bps0 is not None else None)

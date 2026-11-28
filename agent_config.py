@@ -30,6 +30,12 @@ KIS_CONFIG = {
 # =============================================================================
 DATA_CONFIG = {
     "data_dir": "derived",
+    # 종목 목록(바탕 표)의 출처 — 환경변수(또는 .env) NFAV_BASE_SOURCE
+    #   "krx"    : KRX 종목 리스트(corpCode/corplist_merged_*.xlsx) + 업종 분류 파일(sector_map) (기본값, 2026-11-28)
+    #              이때 ratio_source·factor_source 도 "dart" 이면 FnGuide 수집 파일 없이 전략이 돈다
+    #   "fnguide": FnGuide snapshot 파일의 종목 목록 (마켓분야가 '코스닥 전기·전자'처럼 업종까지 붙은 이름)
+    "base_source": get_env("NFAV_BASE_SOURCE", "krx"),
+    "corp_list_file": "corpCode/corplist_merged_[0-9]*.xlsx",
     # FnGuide 수집 결과 (python fngCollect.py all) — '*' 패턴이면 가장 최근 월 파일을 자동 선택
     #   예: snapshot_2026_04.xlsx 와 snapshot_2026_11.xlsx 가 있으면 11월 파일
     "snapshot_file": "derived/snapshot_2*.xlsx",
@@ -47,6 +53,14 @@ DATA_CONFIG = {
     "dart_ratio_file": "derived/dart_ratio_2*.xlsx",
     #   "current": 최근 사업연도의 PER·PBR·EV 배수를 최근 거래일 종가로 계산 / "fiscal_year_end": 결산월 말 종가(검증용)
     "dart_price_basis": get_env("NFAV_DART_PRICE_BASIS", "current"),
+
+    # 멀티팩터 전략의 팩터 점수 출처 — 환경변수(또는 .env) NFAV_FACTOR_SOURCE
+    #   "dart"   : DART·KRX 값으로 직접 계산한 점수 (기본값, 2026-11-27. python apiCollect.py factor → derived/factor_*.xlsx)
+    #              수익건전성 = ROE·ROA·영업이익률, 성장성 = 매출·EPS 증가율, 밸류 = E/P·B/P,
+    #              모멘텀 = 12-1개월 수익률, 변동성 = 월간 수익률 표준편차 (정의: krxFactor.py)
+    #   "fnguide": FnGuide invest_idx 의 팩터 점수 (FnGuide 자체 모델, 산식 비공개) — 비교·검증용
+    "factor_source": get_env("NFAV_FACTOR_SOURCE", "dart"),
+    "factor_file": "derived/factor_2*.xlsx",
 
     # 공식 API 원천 데이터 (python apiCollect.py dart_balance / krx_marketcap) — 가장 최근 파일 사용
     #   시가총액 대체 소스: kb_marketcap → derived/market_cap_kb_*.xlsx (필요 시 아래 경로를 바꿔 사용)
@@ -82,17 +96,18 @@ STRATEGY_CONFIG = {
     },
 
     # --- Greenblatt Magic Formula ---
-    #   2026-11: 종목 선정에서 일단 제외한다(enabled = False). DART 값으로 바꾸면 EV/EBITDA에 필요한 감가상각비가
-    #   일반 기업의 55%에만 있고(현금흐름표 20% + XBRL 주석 35%), 시가총액 500억 미만은 27%뿐이라 소형주가
-    #   후보에서 빠지기 때문이다. 다시 쓰려면 True 로 바꾸고, 필요하면 ev_metric 을 "EV/EBIT" 로 둔다.
+    #   2026-11-27: EV/EBIT 기준으로 다시 켰다. EV/EBITDA는 감가상각비가 일반 기업의 55%에만 있어
+    #   (시가총액 500억 미만은 27%) 소형주가 후보에서 빠지기 때문에 쓰지 않는다.
     "greenblatt": {
-        "enabled": False,
+        "enabled": True,
         "top_n": 30,              # 상위 N개 종목 선정
         "max_debt_ratio": 150.0,  # 부채비율 최대값
-        # 수익수익률에 쓰는 배수: "EV/EBITDA"(기본) 또는 "EV/EBIT"
-        #   DART 값을 쓸 때(ratio_source = "dart") EV/EBITDA는 감가상각비가 확인되는 약 55% 종목에만 있다.
-        #   EV/EBIT는 영업이익만 쓰므로 대부분 종목에 있고, Greenblatt의 원래 정의(EBIT ÷ EV)이기도 하다.
-        "ev_metric": get_env("NFAV_GREENBLATT_EV", "EV/EBITDA"),
+        # 수익수익률에 쓰는 배수: "EV/EBIT"(기본) 또는 "EV/EBITDA" — 환경변수(또는 .env) NFAV_GREENBLATT_EV
+        #   EV/EBIT는 영업이익만 쓰므로 영업흑자 기업 대부분에 있고, Greenblatt의 원래 정의(EBIT ÷ EV)이기도 하다.
+        #   EV/EBITDA는 감가상각비가 확인되는 약 55% 종목에만 있다 (ratio_source = "dart" 일 때).
+        "ev_metric": get_env("NFAV_GREENBLATT_EV", "EV/EBIT"),
+        # 영업흑자인데 EV가 음수(순현금 > 시가총액)인 종목: False = 제외(기본), True = 수익수익률 공동 1위로 포함
+        "include_negative_ev": False,
     },
 
     # --- 멀티팩터 스코어링 ---

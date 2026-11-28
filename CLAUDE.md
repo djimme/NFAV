@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 폴더·전략 (2026-11-25):
 - 로컬 폴더 이름을 `invest_sec` (`E:\Github\invest_sec`)로 바꾸기로 확정. GitHub 저장소 이름(`djimme/NFAV`)과 원격 이름(`NFAV`)은 그대로 둔다 (git은 폴더 이름과 무관). 폴더·저장소 이름을 직접 바꾸는 순서는 `docs/폴더·저장소 이름 변경 안내.html`
 - 전략 설명: `docs/종목 선정 전략 설명.html`(풀어 쓴 설명), `strategy.md`(파라미터 레퍼런스)
+- 전략 입력은 모두 DART·KRX (2026-11-28): 종목 목록 = KRX 리스트(`corpCode/corplist_merged_*.xlsx`), 재무비율 = `dart_ratio`, 팩터 점수 = `python apiCollect.py factor`(`krxFactor.py`) → `derived/factor_YYYY_MM.xlsx`. FnGuide 파일은 읽지 않는다(되돌리기: `.env` 의 `NFAV_BASE_SOURCE`·`NFAV_RATIO_SOURCE`·`NFAV_FACTOR_SOURCE` = `fnguide`). Greenblatt는 EV/EBIT 기준으로 사용
 - 가치함정 필터: `python apiCollect.py dart_risk`(`dartRisk.py`) → `derived/dart_risk_YYYY_MM.xlsx` → `strat_utils.apply_value_trap_filter`. 설정은 `agent_config.COMMON_FILTERS["value_trap"]`
 
 ## Project Overview

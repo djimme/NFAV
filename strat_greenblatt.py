@@ -6,8 +6,9 @@
 #   두 개의 랭킹 합산으로 '좋은 기업을 싸게 사는' 종목 선정.
 #
 # 두 지표:
-#   1. 수익수익률 (Earnings Yield) = 1 / EV/EBITDA  → 높을수록 저평가
-#      (EV/EBITDA가 낮으면 → 기업가치 대비 이익이 크다 → 싸다)
+#   1. 수익수익률 (Earnings Yield) = EBIT ÷ EV = 1 / (EV/EBIT)  → 높을수록 저평가
+#      (EV/EBIT가 낮으면 → 기업가치 대비 영업이익이 크다 → 싸다)
+#      cfg["ev_metric"] 을 "EV/EBITDA" 로 두면 EBITDA 기준으로 계산한다 (감가상각비가 있는 종목만)
 #   2. 자본수익률 (ROIC)          → 높을수록 우량 기업
 #
 # 선정 방식:
@@ -15,7 +16,7 @@
 #   (Greenblatt 원본: 시장 전체 대상, 금융·유틸리티 제외 권고)
 #
 # 필터 조건 (STRATEGY_CONFIG["greenblatt"] 참조):
-#   - EV/EBITDA > 0, ROIC > 0  (음수 = 적자 → 제외)
+#   - EV/EBIT > 0, ROIC > 0  (음수 = 적자 → 제외)
 #   - 부채비율 <= max_debt_ratio (기본값 150%)
 #   - Top N 선정 (기본값 30)
 
@@ -28,12 +29,12 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     Magic Formula = 수익수익률(Earnings Yield) 랭킹 + 자본수익률(ROIC) 랭킹
     두 랭킹의 합이 낮은 종목이 우량.
 
-    수익수익률 = 1 / EV/EBITDA   (높을수록 좋음)
+    수익수익률 = 1 / (EV/EBIT)   (높을수록 좋음. ev_metric 으로 EV/EBITDA 선택 가능)
     자본수익률 = ROIC             (높을수록 좋음)
     """
     result = df.copy()
 
-    ev_metric = cfg.get("ev_metric", "EV/EBITDA")       # "EV/EBITDA" 또는 "EV/EBIT"
+    ev_metric = cfg.get("ev_metric", "EV/EBIT")         # "EV/EBIT" 또는 "EV/EBITDA"
     ev_col   = _best_col(result, _recent_cols(result, "_" + ev_metric))
     roic_col = _best_col(result, _recent_cols(result, "(누적)_ROIC"))
     debt_col = _best_col(result, _recent_cols(result, "(누적)_부채비율"))
@@ -42,15 +43,16 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         print(f"  ⚠️ Greenblatt 전략: 필요 컬럼 없음 ({ev_metric} 또는 ROIC)")
         return pd.DataFrame()
 
-    result["EV_EBITDA_사용"] = pd.to_numeric(result[ev_col], errors="coerce")
+    result["EV배수_사용"] = pd.to_numeric(result[ev_col], errors="coerce")
     result["ROIC_사용"] = pd.to_numeric(result[roic_col], errors="coerce")
 
-    # EV/EBITDA는 양수여야 의미있음 (음수는 적자)
+    # EV 배수가 빈 값이면 영업적자(또는 자료 없음), 음수이면 영업흑자인데 EV가 음수(순현금 > 시가총액)인 종목이다.
+    #   EV 음수 종목은 기본으로 뺀다 — 이론상 가장 싼 종목이지만, 이자부부채가 덜 잡힌 종목일 수도 있어서다.
+    #   include_negative_ev = True 면 수익수익률 1위(공동)로 넣는다.
+    neg_ev = result["EV배수_사용"] < 0
+    ok_ev = (result["EV배수_사용"] > 0) | (neg_ev if cfg.get("include_negative_ev", False) else False)
     result = result[
-        result["EV_EBITDA_사용"].notna() &
-        result["ROIC_사용"].notna() &
-        (result["EV_EBITDA_사용"] > 0) &
-        (result["ROIC_사용"] > 0)
+        result["ROIC_사용"].notna() & ok_ev & (result["ROIC_사용"] > 0)
     ].copy()
 
     # 부채비율 필터
@@ -62,11 +64,13 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     if len(result) == 0:
         return pd.DataFrame()
 
-    # 수익수익률: 1/EV_EBITDA → 높을수록 좋음
-    result["수익수익률"] = 1.0 / result["EV_EBITDA_사용"]
+    # 수익수익률: 1 / EV 배수 → 높을수록 좋음
+    result["수익수익률"] = 1.0 / result["EV배수_사용"]
+    result["EV_음수"] = result["EV배수_사용"] < 0
 
-    # 랭킹 (낮을수록 = 상위권)
-    result["EY_랭크"] = result["수익수익률"].rank(ascending=False)
+    # 랭킹 (낮을수록 = 상위권). EV 음수 종목은 공동 1위
+    result["EY_랭크"] = result["수익수익률"].where(~result["EV_음수"], float("inf")).rank(ascending=False)
+    result.loc[result["EV_음수"], "수익수익률"] = float("nan")
     result["ROIC_랭크"] = result["ROIC_사용"].rank(ascending=False)
     result["Magic_랭크합"] = result["EY_랭크"] + result["ROIC_랭크"]
 
@@ -78,10 +82,12 @@ def strategy_greenblatt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     result["Greenblatt_점수"] = _normalize(1 / result["Magic_랭크합"])
 
     output_cols = ["종목코드", "종목명", "마켓분야", "WI26분야", "KRICS섹터", "KRICS산업그룹",
-                   "수익수익률", "ROIC_사용", "EY_랭크", "ROIC_랭크",
+                   "수익수익률", "EV_음수", "ROIC_사용", "EY_랭크", "ROIC_랭크",
                    "Magic_랭크합", "Greenblatt_점수"]
     if "부채비율_사용" in result.columns:
         output_cols.insert(output_cols.index("수익수익률") + 1, "부채비율_사용")
+    if not result["EV_음수"].any():
+        output_cols.remove("EV_음수")
     output_cols = [c for c in output_cols if c in result.columns]
 
     print(f"  📊 Greenblatt 전략: {len(result)}개 종목 선정 ({ev_metric} 기준)")

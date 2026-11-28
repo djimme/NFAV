@@ -5,8 +5,9 @@
 
 파라미터는 `agent_config.py`의 `STRATEGY_CONFIG`에서 설정.
 
-현재 상태 (2026-11-25): PEG · Piotroski · 멀티팩터 · NCAV · NFAV 사용 중, Greenblatt는 제외(`enabled = False`).
-재무비율·주당 지표는 DART·KRX로 직접 계산한 값(`dart_ratio`)이 기본이고, 멀티팩터의 팩터 점수만 FnGuide 값을 쓴다.
+현재 상태 (2026-11-28): PEG · Piotroski · Greenblatt(EV/EBIT) · 멀티팩터 · NCAV · NFAV 여섯 전략 모두 사용 중.
+전략 입력은 모두 DART·KRX 값이다 — 종목 목록(KRX 리스트), 재무비율·주당 지표(`dart_ratio`), 팩터 점수(`factor`).
+FnGuide 수집 파일은 읽지 않는다(되돌리기: `.env` 의 `NFAV_BASE_SOURCE` · `NFAV_RATIO_SOURCE` · `NFAV_FACTOR_SOURCE` = `fnguide`).
 
 ---
 
@@ -182,11 +183,11 @@ Joseph Piotroski (2000, Journal of Accounting Research) 제안.
 
 ---
 
-## 3. Greenblatt Magic Formula (현재 제외)
+## 3. Greenblatt Magic Formula
 
 **파일:** `strat_greenblatt.py`
 
-> 2026-11부터 종목 선정에서 제외(`enabled = False`). DART 기준 EV/EBITDA에 필요한 감가상각비가 일반 기업의 55%(시총 500억 미만은 27%)에만 있어 소형주가 후보에서 빠지기 때문이다. 다시 쓰려면 `enabled = True`, 필요하면 `ev_metric = "EV/EBIT"`.
+> 2026-11-28: EV/EBIT 기준으로 다시 사용. EV/EBITDA는 필요한 감가상각비가 일반 기업의 55%(시총 500억 미만은 27%)에만 있어 쓰지 않는다. EV/EBIT는 영업이익만 쓰고 Greenblatt의 원래 정의(EBIT ÷ EV)이기도 하다.
 
 ### 이론
 
@@ -198,18 +199,24 @@ Joel Greenblatt "The Little Book That Beats the Market" (2005).
 
 | 지표 | 계산식 | 의미 |
 |------|--------|------|
-| 수익수익률 (Earnings Yield) | 1 ÷ EV/EBITDA | 높을수록 저평가 |
+| 수익수익률 (Earnings Yield) | 1 ÷ (EV/EBIT) = 영업이익 ÷ EV | 높을수록 저평가 |
 | 자본수익률 (ROIC) | ROIC (%) | 높을수록 우량 기업 |
 
 두 지표를 각각 전체 종목 랭킹 → **랭킹 합이 낮은** 상위 N개 선정.
 
+EV = 최근 거래일 시가총액 + 이자부부채 + 비지배지분 − 현금및현금성자산 (`dartRatio.py`). 금융업은 EV·ROIC를 계산하지 않아 자동으로 빠진다.
+
 > Greenblatt 원본 기준: 금융주·유틸리티 제외, 시총 5천만달러 이상
+
+주의:
+- EV 음수(순현금 > 시가총액)인 영업흑자 종목은 기본으로 뺀다. 이론상 가장 싼 종목이지만 이자부부채가 덜 잡힌 종목일 수도 있어서다 (`include_negative_ev`).
+- ROIC는 영업 투하자본(매출채권 + 재고 − 매입채무 + 유·무형자산)이 작은 서비스업에서 수백 %까지 나온다. 순위만 쓰므로 그대로 둔다.
 
 ### 입력 컬럼
 
 | 컬럼 | 출처 |
 |------|------|
-| `{YYYY}_EV/EBITDA` 또는 `{YYYY}_EV/EBIT` | dart_ratio |
+| `{YYYY}_EV/EBIT` (또는 `{YYYY}_EV/EBITDA`) | dart_ratio — 최근 연도는 최근 거래일 종가 기준 |
 | `{YYYY}(누적)_ROIC` | dart_ratio |
 | `{YYYY}(누적)_부채비율` | dart_ratio |
 
@@ -217,10 +224,11 @@ Joel Greenblatt "The Little Book That Beats the Market" (2005).
 
 | 키 | 기본값 | 설명 |
 |----|--------|------|
-| `enabled` | `false` | 전략 활성화 여부 |
+| `enabled` | `true` | 전략 활성화 여부 |
 | `max_debt_ratio` | `150.0` | 부채비율 상한 (%) |
 | `top_n` | `30` | 선정 종목 수 |
-| `ev_metric` | `EV/EBITDA` | 수익수익률에 쓰는 배수 (`EV/EBIT` 가능, 환경변수 `NFAV_GREENBLATT_EV`) |
+| `ev_metric` | `EV/EBIT` | 수익수익률에 쓰는 배수 (`EV/EBITDA` 가능, 환경변수 `NFAV_GREENBLATT_EV`) |
+| `include_negative_ev` | `false` | EV 음수인 영업흑자 종목을 수익수익률 공동 1위로 넣을지 |
 
 ### 출력 컬럼
 
@@ -236,17 +244,23 @@ Joel Greenblatt "The Little Book That Beats the Market" (2005).
 
 단일 팩터 전략은 특정 시장 국면에서 성과가 극단적으로 나빠지는 경향.  
 여러 팩터를 결합하면 리스크 조정 수익률이 안정화됨 (Fama-French, AQR 연구 기반).  
-FnGuide가 제공하는 팩터별 Z-Score를 가중 합산해 종합 순위 산출.
+팩터별 표준점수를 가중 합산해 종합 순위 산출.
 
 ### 사용 팩터
 
-| 팩터 | 컬럼 | 방향 | 설명 |
+팩터 점수는 2026-11-28부터 DART·KRX 값으로 직접 계산한다 (`python apiCollect.py factor` → `derived/factor_YYYY_MM.xlsx`, 정의는 `krxFactor.py`).
+`DATA_CONFIG["factor_source"]`(환경변수 `NFAV_FACTOR_SOURCE`)를 `fnguide` 로 두면 FnGuide invest_idx 의 점수(산식 비공개)를 쓴다.
+
+| 팩터 | 컬럼 | 방향 | 구성 지표 (DART·KRX) |
 |------|------|------|------|
-| 수익건전성 | `수익건전성_종목` | ↑ 높을수록 좋음 | 이익의 안정성·지속성 |
-| 성장성 | `성장성_종목` | ↑ | 매출/이익 성장성 |
-| 밸류 | `밸류_종목` | ↑ | 저평가 정도 (PBR, PER 등 역수) |
-| 모멘텀 | `모멘텀_종목` | ↑ | 과거 3~12개월 가격 모멘텀 |
-| 변동성 | `변동성_종목` | ↓ 낮을수록 좋음 | 가격 변동성 (가중치 음수) |
+| 수익건전성 | `수익건전성_종목` | ↑ 높을수록 좋음 | ROE · ROA · 영업이익률 |
+| 성장성 | `성장성_종목` | ↑ | 매출증가율 · EPS증가율 |
+| 밸류 | `밸류_종목` | ↑ | E/P(EPS ÷ 현재가) · B/P(BPS ÷ 현재가) |
+| 모멘텀 | `모멘텀_종목` | ↑ | 12-1개월 수익률 (13개월 전 월말 → 1개월 전 월말) |
+| 변동성 | `변동성_종목` | ↓ 낮을수록 좋음 | 최근 12개월 월간 수익률 표준편차 (가중치 음수) |
+
+구성 지표마다 위아래 5%를 자르고 전 종목 대비 표준점수로 만든 뒤 평균한다. 구성 지표 원값은 결과의 `팩터_…` 열에 남는다.
+FnGuide 점수와의 순위상관(2026-11): 변동성 0.79 · 밸류 0.78 · 모멘텀 0.58 · 성장성 0.33 · 수익건전성 0.23 — 정의가 달라 선정 종목은 거의 다 바뀐다.
 
 ### 기본 가중치
 
@@ -264,7 +278,7 @@ FnGuide가 제공하는 팩터별 Z-Score를 가중 합산해 종합 순위 산�
 
 ### 출력 컬럼
 
-`수익건전성_종목`, `성장성_종목`, `밸류_종목`, `모멘텀_종목`, `변동성_종목`, `멀티팩터_점수`
+`수익건전성_종목`, `성장성_종목`, `밸류_종목`, `모멘텀_종목`, `변동성_종목`, `멀티팩터_점수`, `팩터_출처`
 
 ---
 
@@ -342,7 +356,7 @@ NFAV_B  = 금융자산 − 이자부부채                    (재무구조 · �
 | NCAV | 0.10 |
 | NFAV | 0.05 (설정에 없어 코드 기본값) |
 
-1개 이상 전략에 포함된 종목만 최종 리스트에 등재. Greenblatt는 제외 중이라 점수가 없다.
+1개 이상 전략에 포함된 종목만 최종 리스트에 등재.
 가중치 합으로 나누지 않으므로, 여러 전략을 동시에 통과한 종목일수록 종합점수가 높아진다.
 
 ---

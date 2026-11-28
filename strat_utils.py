@@ -1,6 +1,6 @@
 # strat_utils.py
 # 전략 모듈 공통 유틸리티
-# - FnGuide Excel 파일 로딩 (load_all_data, merge_base)
+# - 전략 입력 파일 로딩·병합 (load_all_data, merge_base): 종목 목록은 KRX 리스트, FnGuide 파일은 필요할 때만
 # - 공식 API 원천 데이터 로딩: DART 재무상태표, 시가총액 (선택, 파일이 있으면 병합)
 # - 업종 분류 로딩: KRICS 섹터·산업그룹 (선택, sectorCollect.py 결과 파일이 있으면 병합)
 # - 공통 종목 필터 (apply_common_filters)
@@ -24,8 +24,10 @@ warnings.filterwarnings("ignore")
 
 def load_all_data(config: dict) -> dict:
     """
-    4개의 xlsx 파일을 로드하고 제조업 시트를 기준으로 합칩니다.
-    재무비율/재무제표는 모든 업종 시트를 수직으로 합칩니다.
+    전략 입력 파일을 로드합니다. 재무제표(finance)는 모든 업종 시트를 수직으로 합칩니다.
+
+    FnGuide 수집 파일(snapshot·invest_idx·ratio)은 필요할 때만 읽습니다 —
+    base_source·ratio_source·factor_source 가 모두 FnGuide 가 아니고 대체 파일(dart_ratio·factor)이 있으면 건너뜁니다.
 
     Returns:
         {
@@ -45,9 +47,31 @@ def load_all_data(config: dict) -> dict:
 
     data = {}
 
+    # 종목 목록 (base_source = "krx"): KRX 종목 리스트. 없으면 FnGuide snapshot 을 바탕 표로 쓴다
+    base_source = config.get("base_source", "fnguide")
+    if base_source == "krx":
+        files = sorted(f for f in glob.glob(config.get("corp_list_file") or "") if "ETF" not in f)
+        if files:
+            cl = pd.read_excel(files[-1], dtype=str).rename(columns={
+                "scode": "종목코드", "sname": "종목명", "industry": "업종", "products": "주요제품", "market": "마켓분야"})
+            cl["종목코드"] = cl["종목코드"].str.zfill(6)
+            data["corplist"] = cl[[c for c in ["종목코드", "종목명", "업종", "주요제품", "마켓분야"] if c in cl.columns]]
+            print(f"  ✅ 종목 목록(KRX): {files[-1]} ({len(cl)}개 종목)")
+        else:
+            print(f"  ⚠️ KRX 종목 리스트 없음 ({config.get('corp_list_file')}) → FnGuide snapshot 을 바탕 표로 쓴다")
+            base_source = "fnguide"
+    # FnGuide 수집 파일이 필요한가: 바탕 표·재무비율·팩터 점수 중 하나라도 FnGuide 값을 써야 하면 읽는다
+    need_fnguide = (base_source != "krx"
+                    or config.get("ratio_source") != "dart" or not _latest_file(config.get("dart_ratio_file"))
+                    or config.get("factor_source") != "dart" or not _latest_file(config.get("factor_file")))
+    if not need_fnguide:
+        print("  ℹ️  FnGuide 수집 파일(snapshot·invest_idx·ratio)은 읽지 않는다 (종목 목록·재무비율·팩터 점수 모두 DART·KRX)")
+
     # snapshot (단일 시트)
     snap_path = config["snapshot_file"]
-    if os.path.exists(snap_path):
+    if not need_fnguide:
+        pass
+    elif os.path.exists(snap_path):
         data["snapshot"] = pd.read_excel(snap_path, dtype={"종목코드": str})
         data["snapshot"]["종목코드"] = data["snapshot"]["종목코드"].str.zfill(6)
         print(f"  ✅ snapshot: {len(data['snapshot'])}개 종목")
@@ -56,7 +80,9 @@ def load_all_data(config: dict) -> dict:
 
     # invest_idx (단일 시트)
     inv_path = config["invest_idx_file"]
-    if os.path.exists(inv_path):
+    if not need_fnguide:
+        pass
+    elif os.path.exists(inv_path):
         data["invest"] = pd.read_excel(inv_path, dtype={"종목코드": str})
         data["invest"]["종목코드"] = data["invest"]["종목코드"].str.zfill(6)
         print(f"  ✅ invest_idx: {len(data['invest'])}개 종목")
@@ -76,7 +102,9 @@ def load_all_data(config: dict) -> dict:
 
     # ratio (여러 업종 시트 합산)
     rat_path = config["ratio_file"]
-    if os.path.exists(rat_path):
+    if not need_fnguide:
+        pass
+    elif os.path.exists(rat_path):
         rat_sheets = pd.read_excel(rat_path, sheet_name=None, dtype={"종목코드": str})
         rat_df = pd.concat(rat_sheets.values(), ignore_index=True)
         rat_df["종목코드"] = rat_df["종목코드"].str.zfill(6)
@@ -116,6 +144,19 @@ def load_all_data(config: dict) -> dict:
         print(f"  ✅ 가치함정 점검 자료: {path} ({len(df)}개 종목)")
     else:
         print(f"  ℹ️  가치함정 점검 자료 없음 ({config.get('dart_risk_file')}) → python apiCollect.py dart_risk 로 수집")
+
+    # --- DART·KRX로 직접 계산한 팩터 점수 (선택) — python apiCollect.py factor ---
+    #   factor_source 가 "dart" 이면 invest_idx 의 FnGuide 팩터 점수를 이 파일 값으로 바꾼다 (merge_base)
+    if config.get("factor_source") == "dart":
+        path = _latest_file(config.get("factor_file"))
+        if path:
+            df = pd.read_excel(path, dtype={"종목코드": str})
+            df["종목코드"] = df["종목코드"].str.zfill(6)
+            data["factor"] = df
+            print(f"  ✅ 팩터 점수(DART·KRX): {path} ({len(df)}개 종목)")
+        else:
+            print(f"  ⚠️ 팩터 점수 파일 없음 ({config.get('factor_file')}) → FnGuide 팩터 점수를 그대로 쓴다 "
+                  f"(python apiCollect.py factor 로 생성)")
 
     # --- DART로 직접 계산한 재무비율·주당 지표 (선택) — python apiCollect.py dart_ratio ---
     #   ratio_source 가 "dart" 이면 FnGuide snapshot·ratio·invest_idx 의 해당 값을 이 파일 값으로 바꾼다 (merge_base)
@@ -188,10 +229,17 @@ def _operating_loss_streak(fin: pd.DataFrame) -> pd.DataFrame:
 
 def merge_base(data: dict) -> pd.DataFrame:
     """
-    snapshot을 기준으로 나머지 데이터를 LEFT JOIN합니다.
+    종목 목록(KRX 종목 리스트, 없으면 FnGuide snapshot)을 기준으로 나머지 데이터를 LEFT JOIN합니다.
     모든 전략의 공통 베이스 DataFrame이 됩니다.
     """
-    base = data["snapshot"].copy()
+    if "corplist" in data:
+        base = data["corplist"].copy()
+        # WI26분야는 업종 분류 파일에서 가져온다 (FnGuide snapshot 과 같은 값)
+        if "sector_map" in data and "WI26분야" in data["sector_map"].columns:
+            base = base.merge(data["sector_map"].drop_duplicates("종목코드")[["종목코드", "WI26분야"]],
+                              on="종목코드", how="left")
+    else:
+        base = data["snapshot"].copy()
 
     # 업종 분류 (있으면): KRICS섹터·KRICS산업그룹을 WI26분야 바로 뒤에 넣는다
     #   KRICS에 없는 종목(외국 법인·스팩 등)은 빈 값으로 남는다
@@ -210,26 +258,37 @@ def merge_base(data: dict) -> pd.DataFrame:
     fin_cols = list(dict.fromkeys(fin_cols))  # 중복 제거
     base = base.merge(fin[fin_cols], on="종목코드", how="left")
 
-    # ratio: 핵심 컬럼만 선택
-    rat = data["ratio"]
-    keep_keywords = ["부채비율", "유동비율", "ROA", "ROE", "ROIC",
-                     "EPS증가율", "영업이익률", "총자산회전율", "매출액증가율"]
-    rat_cols = ["종목코드"] + [c for c in rat.columns
-                               if any(k in c for k in keep_keywords)]
-    rat_cols = list(dict.fromkeys(rat_cols))
-    base = base.merge(rat[rat_cols], on="종목코드", how="left")
+    # ratio (FnGuide, 읽었을 때만): 핵심 컬럼만 선택
+    if "ratio" in data:
+        rat = data["ratio"]
+        keep_keywords = ["부채비율", "유동비율", "ROA", "ROE", "ROIC",
+                         "EPS증가율", "영업이익률", "총자산회전율", "매출액증가율"]
+        rat_cols = ["종목코드"] + [c for c in rat.columns
+                                   if any(k in c for k in keep_keywords)]
+        rat_cols = list(dict.fromkeys(rat_cols))
+        base = base.merge(rat[rat_cols], on="종목코드", how="left")
 
-    # invest_idx: 팩터 점수 및 밸류에이션
-    inv = data["invest"]
-    inv_keep = ["종목코드", "팩터_업종명",
-                "베타_종목", "배당성_종목", "수익건전성_종목",
-                "성장성_종목", "기업투자_종목", "모멘텀_종목",
-                "밸류_종목", "변동성_종목", "단기 Return_종목"]
-    # EV/EBITDA 컬럼 추가
-    ev_cols = [c for c in inv.columns if "EV/EBITDA" in c]
-    inv_keep += ev_cols
-    inv_keep = [c for c in inv_keep if c in inv.columns]
-    base = base.merge(inv[inv_keep], on="종목코드", how="left")
+    # invest_idx (FnGuide, 읽었을 때만): 팩터 점수 및 밸류에이션
+    if "invest" in data:
+        inv = data["invest"]
+        inv_keep = ["종목코드", "팩터_업종명",
+                    "베타_종목", "배당성_종목", "수익건전성_종목",
+                    "성장성_종목", "기업투자_종목", "모멘텀_종목",
+                    "밸류_종목", "변동성_종목", "단기 Return_종목"]
+        # EV/EBITDA 컬럼 추가
+        ev_cols = [c for c in inv.columns if "EV/EBITDA" in c]
+        inv_keep += ev_cols
+        inv_keep = [c for c in inv_keep if c in inv.columns]
+        base = base.merge(inv[inv_keep], on="종목코드", how="left")
+
+    # 팩터 점수를 DART·KRX 계산 값으로 바꾼다 (factor_source = "dart" 일 때만)
+    #   FnGuide 점수 열을 빼고 같은 이름의 열을 넣는다. 구성 지표 원값('팩터_…')과 출처도 함께 붙인다
+    if "factor" in data:
+        fac = data["factor"].drop_duplicates("종목코드")
+        cols = [c for c in fac.columns if c.endswith("_종목") or (c.startswith("팩터_") and c != "팩터_업종명")]
+        base = base.drop(columns=[c for c in cols if c in base.columns])
+        base = base.merge(fac[["종목코드"] + cols], on="종목코드", how="left")
+        base["팩터_출처"] = "DART·KRX"
 
     # DART 재무상태표 (있으면)
     if "dart_balance" in data:
