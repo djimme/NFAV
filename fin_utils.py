@@ -25,7 +25,41 @@ import re
 import requests
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+# 엑셀 "삽입 → 표" 스타일: "흰색, 표 스타일 밝게 1"
+EXCEL_TABLE_STYLE = "TableStyleLight1"
+
+
+def _apply_excel_table(ws, table_no):
+    """시트의 데이터 범위(1행 = 머리글)에 엑셀 표를 적용한다.
+
+    엑셀 표는 머리글이 비어 있지 않은 고유한 문자열이어야 하므로,
+    숫자·빈칸·중복 머리글은 문자열로 바꾸고 중복에는 _2, _3 … 을 붙인다.
+    데이터 행이 없으면 표를 만들지 않는다.
+    """
+    if ws.max_row < 2 or ws.max_column < 1:
+        return
+    seen = set()
+    for col in range(1, ws.max_column + 1):
+        cell = ws.cell(row=1, column=col)
+        name = '' if cell.value is None else str(cell.value).strip()
+        name = name or f'열{col}'
+        base, n = name, 2
+        while name in seen:
+            name = f'{base}_{n}'
+            n += 1
+        seen.add(name)
+        cell.value = name
+
+    ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    table = Table(displayName=f"Table{table_no}", ref=ref)
+    table.tableStyleInfo = TableStyleInfo(name=EXCEL_TABLE_STYLE, showFirstColumn=False,
+                                          showLastColumn=False, showRowStripes=True,
+                                          showColumnStripes=False)
+    ws.add_table(table)
 
 
 def save_styled_excel(df, filepath, sheet_name="Sheet1", index=False):
@@ -34,6 +68,7 @@ def save_styled_excel(df, filepath, sheet_name="Sheet1", index=False):
     서식:
         - 글꼴: 맑은 고딕, 10pt
         - 맞춤: 상하 가운데, 좌우 가운데
+        - 엑셀 표(삽입 → 표) 적용, 스타일 "흰색, 표 스타일 밝게 1"
     """
     wb = Workbook()
     ws = wb.active
@@ -52,6 +87,7 @@ def save_styled_excel(df, filepath, sheet_name="Sheet1", index=False):
             if isinstance(cell.value, (int, float)):
                 cell.number_format = '#,##0.##'
 
+    _apply_excel_table(ws, 1)
     wb.save(filepath)
 
 
@@ -65,13 +101,14 @@ def save_styled_excel_multisheet(sheets, filepath):
     서식:
         - 글꼴: 맑은 고딕, 10pt
         - 맞춤: 상하 가운데, 좌우 가운데
+        - 시트마다 엑셀 표(삽입 → 표) 적용, 스타일 "흰색, 표 스타일 밝게 1"
     """
     wb = Workbook()
     font = Font(name="맑은 고딕", size=10)
     alignment = Alignment(horizontal="center", vertical="center")
 
     first = True
-    for sheet_name, df in sheets:
+    for table_no, (sheet_name, df) in enumerate(sheets, start=1):
         if first:
             ws = wb.active
             ws.title = sheet_name
@@ -88,6 +125,8 @@ def save_styled_excel_multisheet(sheets, filepath):
                 cell.alignment = alignment
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0.##'
+
+        _apply_excel_table(ws, table_no)
 
     wb.save(filepath)
 
